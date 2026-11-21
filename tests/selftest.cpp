@@ -4,6 +4,7 @@
 
 #include "core/RichText.h"
 #include "core/ScreenConfig.h"
+#include "import/DeckImporter.h"
 #include "import/SongImporter.h"
 #include "render/MediaPool.h"
 #include "render/ScreenRenderer.h"
@@ -16,6 +17,9 @@
 #include <QJsonDocument>
 #include <QLinearGradient>
 #include <QPainter>
+#include <QPdfWriter>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QTextDocument>
 #include <cstdio>
 
@@ -219,6 +223,52 @@ static void testDecksAndArrangements()
     CHECK(song.defaultBackground.color == QColor(Qt::darkGreen));
 }
 
+static void testDeckImport(const QString &outDir)
+{
+    // A 3-page PDF made with Qt itself, so the test needs no fixture files.
+    const QString pdf = outDir + "/deck.pdf";
+    {
+        QPdfWriter writer(pdf);
+        writer.setPageSize(QPageSize(QSizeF(254, 142.875), QPageSize::Millimeter));   // 16:9
+        QPainter p(&writer);
+        for (int i = 1; i <= 3; ++i) {
+            if (i > 1) writer.newPage();
+            p.fillRect(QRect(0, 0, writer.width(), writer.height()), QColor(40 * i, 30, 90));
+            QFont f("Arial");
+            f.setPixelSize(writer.height() / 6);
+            p.setFont(f);
+            p.setPen(Qt::white);
+            p.drawText(QRect(0, 0, writer.width(), writer.height()), Qt::AlignCenter, QStringLiteral("Point %1").arg(i));
+        }
+    }
+    Presentation deck;
+    QString error;
+    if (!DeckImporter::importFile(pdf, outDir + "/media", &deck, &error)) {
+        // No PDF renderer on this machine (no Qt PDF and no pdftoppm): skip, don't fail.
+        std::printf("SKIP deck import: %s\n", qPrintable(error));
+        return;
+    }
+    CHECK(deck.slides.size() == 3);
+    CHECK(deck.category == "Presentation" && deck.title == "deck");
+    const QImage page = QImage(deck.slides.value(1).background.path);
+    CHECK(!page.isNull() && page.width() == 1920);
+    CHECK(qAbs(page.height() - 1080) <= 2);
+    if (!page.isNull()) page.save(outDir + "/deck_page2.png");
+
+    // PowerPoint route via LibreOffice, when it's installed (skipped in CI).
+    const QString soffice = QStandardPaths::findExecutable("soffice");
+    if (soffice.isEmpty()) return;
+    QProcess lo;
+    lo.start(soffice, {"--headless", "--infilter=impress_pdf_import", "--convert-to", "pptx", "--outdir", outDir, pdf});
+    if (!lo.waitForFinished(120000) || !QFile::exists(outDir + "/deck.pptx")) {
+        std::printf("SKIP pptx import: LibreOffice could not make a test pptx\n");
+        return;
+    }
+    Presentation fromPptx;
+    CHECK(DeckImporter::importFile(outDir + "/deck.pptx", outDir + "/media", &fromPptx, &error));
+    CHECK(fromPptx.slides.size() == 3);
+}
+
 static QString makeBackground(const QString &dir)
 {
     QImage img(1920, 1080, QImage::Format_RGB32);
@@ -302,6 +352,7 @@ int main(int argc, char **argv)
     testModel();
     testShowFeatures();
     testDecksAndArrangements();
+    testDeckImport(out);
     testRender(out);
     std::printf("%s (%d failures), renders in %s\n", failures ? "FAILED" : "OK", failures, qPrintable(out));
     return failures ? 1 : 0;

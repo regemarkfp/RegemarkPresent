@@ -4,24 +4,37 @@
 
 Presentation software for running church services. You build songs and slides, then send them to several screens at the same time: projectors and monitors through the graphics card, NDI over the network, and SDI through Blackmagic DeckLink cards.
 
-## What works today (milestone 1)
+## What it does (v0.2)
 
-| Area | Status |
-|---|---|
-| Song library with search (title, lyrics, author, CCLI #) | ✅ |
-| Playlists with section headers and drag-to-reorder; at the end of a song, "next" moves on to the next song | ✅ |
-| Import from SongSelect: `.usr`, lyrics `.txt` and ChordPro, via the menu or drag and drop | ✅ |
-| New song from pasted lyrics (SongSelect "copy lyrics" works as-is) | ✅ |
-| Slide editor: rich text per word (bold, italic, underline, colour, size), several text boxes, box position, font, outline, shadow, alignment, shrink-to-fit | ✅ |
-| Transition per slide (cut, fade, slide left, slide up, zoom) with a default per song | ✅ |
-| Build-in animation per text box (fade, rise, zoom, wipe) with a delay and duration | ✅ |
-| **Backgrounds per slide that change as the song goes on**: each slide can set a colour, image or looping video, and later slides keep it until another slide sets a new one | ✅ |
-| Media bin over any folders (e.g. your Sunday Screens downloads): send live, apply to selected slides, or apply to the whole song | ✅ |
-| Screens: **Audience**, **Confidence** (current and next slide, clock, notes, group label), **Stream overlay** (transparent lower third) | ✅ |
-| Per-screen settings: show/hide backgrounds and text, transparency, its own text position and style, band behind the text | ✅ |
-| Outputs per screen, any combination: monitor/projector, **NDI** (with alpha), **DeckLink SDI** (with external fill + key) | ✅ (DeckLink needs the SDK at build time, see below) |
-| Clear all / background / text (F1 / F2 / F3) and keyboard control | ✅ |
-| Windows installer (Inno Setup) built by GitHub Actions | ✅ |
+**Songs**
+- Library with search (title, lyrics, author, CCLI #), looks you can apply to many songs, and a default look for new songs
+- **SongSelect inside the app**: sign in once, click Download, and the song lands in your library (re-downloads don't duplicate)
+- Import `.usr`, lyrics `.txt` and ChordPro via the menu or drag and drop, or paste copied lyrics
+- **Arrangements**: named orders such as V1 C V2 C B C C, without duplicating slides
+
+**Presentations (slide decks, separate from songs)**
+- A ProPresenter-style editor: drag and resize elements on the slide with snap guides
+- Text boxes with per-word formatting, plus **images** (logos, photos) and **shapes** (panels, bands, cards), with layer order, rounded corners and opacity
+- **Media slides**: full-screen photos and videos (videos play with sound)
+- **Import PowerPoint and PDF**: each slide becomes an image slide. This uses PowerPoint on Windows if it's installed, otherwise LibreOffice
+- Per-slide transitions (cut, fade, slide, zoom) and per-element build animations
+
+**Bible**
+- Browse and download Bibles from the Zefania library inside the app (including the Afrikaans 1933/1953 and KJV), or import your own Zefania XML
+- Type "John 3:16-18", "Joh 3:16" or "Johannes 3:16". Verses become slides with a reference line; show them straight away or add them to the playlist
+
+**Running the service**
+- Playlists with headers. At the end of an item, "next" moves to the next one
+- **Backgrounds per slide that change as a song builds**, a media bin over your folders (e.g. Sunday Screens downloads), and crossfades
+- **Media cues and announcement loops**: videos with sound, images that advance every N seconds, and looping
+- **Timer**: a countdown for a set length or until a time, shown on the confidence screen. `{timer}`, `{clock}` and `{date}` work in any slide text, and there's a one-click "Service starts in" slide
+- Clear all / background / text (F1 / F2 / F3) and keyboard control
+
+**Screens and outputs**
+- **Audience**, **Confidence** (current and next slide, clock, timer, notes) and **Stream overlay** (transparent lower third)
+- Each screen has its own look: show or hide backgrounds and text, its own text position and style, and a band behind the text
+- Send any screen to a monitor or projector, **NDI** (with alpha) and **DeckLink SDI** (fill + key) at the same time. "Identify displays" shows you which monitor is which
+- Windows installer built by GitHub Actions
 
 ## Running a service
 
@@ -71,7 +84,8 @@ src/core     data model (presentations, slides, styles, screens), library, setti
 src/render   ScreenRenderer (transitions, builds, background crossfades), text layout, MediaPool (shared video decoders)
 src/show     ShowController: the single source of truth for what is live
 src/output   OutputEngine (per-screen frame clock) and sinks: DisplayOutput, NdiOutput, DeckLinkOutput
-src/import   SongSelect USR / TXT / ChordPro importers
+src/import   SongSelect USR / TXT / ChordPro importers, PDF / PowerPoint deck import
+src/bible    Zefania Bibles: loader, references (English + Afrikaans), online library, Bible tab
 src/ui       main window, slide editor, screen setup, media bin
 tests        headless self-test that also writes sample frames as PNGs
 ```

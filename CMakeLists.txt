@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(RegemarkPresent VERSION 0.1.0 LANGUAGES C CXX)
+project(RegemarkPresent VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,6 +28,7 @@ set(SOURCES
     src/output/NdiOutput.cpp
     src/output/OutputEngine.cpp
     src/import/SongImporter.cpp
+    src/import/DeckImporter.cpp
     src/bible/BookNames.cpp
     src/bible/Bible.cpp
     src/bible/Reference.cpp
@@ -76,6 +77,13 @@ add_library(rpcore STATIC ${SOURCES})
 target_include_directories(rpcore PUBLIC src)
 target_link_libraries(rpcore PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network)
 target_compile_definitions(rpcore PUBLIC RP_VERSION="${PROJECT_VERSION}")
+
+# Optional: PDF import renders pages with Qt PDF (falls back to pdftoppm).
+find_package(Qt6 QUIET COMPONENTS Pdf)
+if(Qt6Pdf_FOUND)
+    target_link_libraries(rpcore PUBLIC Qt6::Pdf)
+    target_compile_definitions(rpcore PRIVATE RP_HAVE_PDF=1)
+endif()
 
 # Optional: SongSelect opens inside the app when Qt WebEngine is available;
 # otherwise it falls back to the system browser + watching Downloads.

@@ -1,5 +1,6 @@
 #include "ui/MainWindow.h"
 
+#include "import/DeckImporter.h"
 #include "import/SongImporter.h"
 #include "output/OutputEngine.h"
 #include "render/TextRenderer.h"
@@ -56,6 +57,7 @@
 static const QSize kThumb(240, 135);
 static const QSize kPreview(272, 153);
 static const QStringList kSongExt = {"usr", "txt", "cho", "chordpro", "chopro", "pro"};
+static const QStringList kDeckExt = {"pdf", "pptx", "ppt", "odp", "key"};
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
@@ -924,10 +926,20 @@ void MainWindow::importSongs(const QStringList &given)
 {
     QStringList files = given;
     if (files.isEmpty()) {
-        files = QFileDialog::getOpenFileNames(this, tr("Import songs from SongSelect"), m_settings.lastImportDir,
-                                              SongImporter::fileFilters().join(";;"));
+        QStringList filters = {tr("Songs and presentations (*.usr *.txt *.cho *.chordpro *.chopro *.pro *.pdf *.pptx *.ppt *.odp *.key)")};
+        filters += SongImporter::fileFilters();
+        filters += DeckImporter::fileFilters();
+        files = QFileDialog::getOpenFileNames(this, tr("Import songs or presentations"), m_settings.lastImportDir,
+                                              filters.join(";;"));
         if (files.isEmpty()) return;
     }
+    // PDFs and PowerPoints become slide decks; everything else is a song.
+    QStringList decks;
+    for (const QString &f : files)
+        if (kDeckExt.contains(QFileInfo(f).suffix().toLower())) decks << f;
+    for (const QString &f : decks) files.removeAll(f);
+    if (!decks.isEmpty()) importDecks(decks);
+    if (files.isEmpty()) return;
     bool ok = false;
     const int lines = QInputDialog::getInt(this, tr("Import songs"),
                                            tr("Lines per slide (0 = whole section on one slide):"),
@@ -937,6 +949,35 @@ void MainWindow::importSongs(const QStringList &given)
     m_settings.lastImportDir = QFileInfo(files.first()).absolutePath();
     m_settings.save();
     importFiles(files, false);
+}
+
+void MainWindow::importDecks(const QStringList &files)
+{
+    QStringList errors;
+    QString lastId;
+    for (const QString &f : files) {
+        statusBar()->showMessage(tr("Importing %1…").arg(QFileInfo(f).fileName()));
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        QApplication::processEvents();
+        Presentation p;
+        QString err;
+        const bool ok = DeckImporter::importFile(f, m_library->root() + "/Media", &p, &err);
+        QApplication::restoreOverrideCursor();
+        if (!ok) {
+            errors << QStringLiteral("%1: %2").arg(QFileInfo(f).fileName(), err);
+            continue;
+        }
+        m_library->save(p);
+        lastId = p.id;
+    }
+    if (!lastId.isEmpty()) {
+        m_leftTabs->setCurrentIndex(1);
+        showPresentation(lastId);
+        statusBar()->showMessage(tr("Imported %1 of %2 presentations").arg(files.size() - errors.size()).arg(files.size()), 6000);
+    } else {
+        statusBar()->clearMessage();
+    }
+    if (!errors.isEmpty()) QMessageBox::warning(this, tr("Import"), errors.join('\n'));
 }
 
 void MainWindow::importFiles(const QStringList &files, bool quiet)
@@ -1146,7 +1187,8 @@ void MainWindow::openScreenSetup()
 void MainWindow::dragEnterEvent(QDragEnterEvent *e)
 {
     for (const QUrl &u : e->mimeData()->urls())
-        if (kSongExt.contains(QFileInfo(u.toLocalFile()).suffix().toLower())) {
+        if (kSongExt.contains(QFileInfo(u.toLocalFile()).suffix().toLower())
+            || kDeckExt.contains(QFileInfo(u.toLocalFile()).suffix().toLower())) {
             e->acceptProposedAction();
             return;
         }
@@ -1156,7 +1198,9 @@ void MainWindow::dropEvent(QDropEvent *e)
 {
     QStringList files;
     for (const QUrl &u : e->mimeData()->urls())
-        if (kSongExt.contains(QFileInfo(u.toLocalFile()).suffix().toLower())) files << u.toLocalFile();
+        if (kSongExt.contains(QFileInfo(u.toLocalFile()).suffix().toLower())
+            || kDeckExt.contains(QFileInfo(u.toLocalFile()).suffix().toLower()))
+            files << u.toLocalFile();
     if (!files.isEmpty()) importSongs(files);
 }
 

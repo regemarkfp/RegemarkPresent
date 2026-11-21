@@ -49,6 +49,7 @@ private:
     void newFromLyrics();
     void importSongs(const QStringList &files = {});
     void importFiles(const QStringList &files, bool quiet);
+    void importDecks(const QStringList &files);
     void openSongSelect();
     void editPresentation(int slideIndex = 0);
     void deletePresentation();
