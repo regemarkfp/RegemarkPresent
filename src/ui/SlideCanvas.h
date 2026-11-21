@@ -16,6 +16,11 @@ public:
     // The rendered slide (background + text) and the boxes to interact with.
     void setSlide(const QImage &rendered, const QList<QRectF> &boxes, int selected);
 
+    // Where box `i` is drawn, and how many widget pixels a 1080p pixel is:
+    // the in-place text editor sits exactly over the box at this scale.
+    QRectF boxRectInWidget(int i) const { return i >= 0 && i < m_boxes.size() ? toWidget(m_boxes[i]) : QRectF(); }
+    double displayScale() const { return frame().height() / 1080.0; }
+
     QSize sizeHint() const override { return QSize(640, 360); }
     bool hasHeightForWidth() const override { return true; }
     int heightForWidth(int w) const override { return w * 9 / 16; }
@@ -23,7 +28,9 @@ public:
 signals:
     void boxSelected(int index);
     void boxMoved(int index, const QRectF &rect);   // normalised 0..1
-    void boxEditRequested(int index);               // double-click: edit its text
+    void boxEditRequested(int index);               // double-click / Enter: edit its text
+    void pressed();                                 // any click on the canvas itself
+    void layoutChanged();                           // resized: overlays must follow
 
 protected:
     void paintEvent(QPaintEvent *) override;
@@ -32,6 +39,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *e) override;
     void mouseDoubleClickEvent(QMouseEvent *e) override;
     void keyPressEvent(QKeyEvent *e) override;
+    void resizeEvent(QResizeEvent *e) override;
 
 private:
     enum Handle { None = -1, Move = 0, TL, T, TR, R, BR, B, BL, L };

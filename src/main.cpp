@@ -3,6 +3,7 @@
 #include "core/Library.h"
 #include "ui/MainWindow.h"
 #include "ui/MediaBin.h"
+#include "ui/SlideCanvas.h"
 #include "ui/SlideEditor.h"
 #include "ui/ScreenSetupDialog.h"
 #include "ui/Theme.h"
@@ -54,6 +55,14 @@ int main(int argc, char *argv[])
         MediaBin media;
         SlideEditor editor(songs.first(), 1, &media, &library);
         editor.show();
+        // RP_GRAB_TYPING=1 opens the main text box for typing first.
+        if (!qEnvironmentVariable("RP_GRAB_TYPING").isEmpty())
+            QTimer::singleShot(500, &editor, [&] {
+                const Slide &s = songs.first().slides.value(1);
+                int firstText = 0;
+                while (firstText < s.boxes.size() && !s.boxes[firstText].isText()) ++firstText;
+                if (auto *canvas = editor.findChild<SlideCanvas *>()) emit canvas->boxEditRequested(firstText);
+            });
         QTimer::singleShot(1500, &editor, [&] {
             editor.grab().save(args.value(grabEditor));
             QApplication::exit(0);

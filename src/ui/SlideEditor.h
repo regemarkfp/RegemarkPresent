@@ -40,6 +40,9 @@ private:
     void loadText();
     void updatePreview();
     void storeText();
+    void startEditing();
+    void stopEditing();
+    void placeEditor();
     void storeSlide();
     void storeBox();
     void chooseBackground(bool presentationDefault);
@@ -48,6 +51,9 @@ private:
     int m_slide = 0;
     int m_box = 0;
     bool m_loading = false;
+    bool m_editing = false;          // typing on the slide
+    bool m_placing = false;
+    double m_editScale = 0.4;        // canvas pixels per 1080p pixel
     MediaBin *m_media;
     Library *m_library;
 

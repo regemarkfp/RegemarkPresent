@@ -98,8 +98,15 @@ QRectF SlideCanvas::snapped(const QRectF &in, Handle h)
     return r;
 }
 
+void SlideCanvas::resizeEvent(QResizeEvent *e)
+{
+    QWidget::resizeEvent(e);
+    emit layoutChanged();
+}
+
 void SlideCanvas::mousePressEvent(QMouseEvent *e)
 {
+    emit pressed();
     const QPointF p = e->position();
     Handle h = handleAt(p);
     if (h == None) {
@@ -172,6 +179,10 @@ void SlideCanvas::mouseDoubleClickEvent(QMouseEvent *e)
 void SlideCanvas::keyPressEvent(QKeyEvent *e)
 {
     if (m_selected < 0) return QWidget::keyPressEvent(e);
+    if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter || e->key() == Qt::Key_F2) {
+        emit boxEditRequested(m_selected);
+        return;
+    }
     const double step = (e->modifiers() & Qt::ShiftModifier) ? 0.02 : 0.005;
     QPointF d;
     switch (e->key()) {

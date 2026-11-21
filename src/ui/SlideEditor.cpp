@@ -5,6 +5,7 @@
 #include "render/TextRenderer.h"
 #include "ui/MediaBin.h"
 #include "ui/SlideCanvas.h"
+#include "ui/Theme.h"
 #include "ui/Widgets.h"
 
 #include <QCheckBox>
@@ -24,15 +25,16 @@
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QShortcut>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTabWidget>
 #include <QTextEdit>
+#include <QTextFrame>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 // The rich-text editor shows text at this fraction of its 1080p pixel size.
-static constexpr double kEditScale = 0.4;
 static const QSize kPreview(960, 540);
 
 SlideEditor::SlideEditor(const Presentation &p, int startIndex, MediaBin *media, Library *library, QWidget *parent)
@@ -109,9 +111,9 @@ void SlideEditor::buildUi()
     auto *centerL = new QVBoxLayout(center);
     centerL->setContentsMargins(0, 0, 0, 0);
     m_canvas = new SlideCanvas;
-    m_canvas->setToolTip(tr("Click a text box to select it. Drag to move, drag the handles to resize. "
+    m_canvas->setToolTip(tr("Click a text box to select it; drag to move, drag the handles to resize. "
+                            "Double-click (or Enter) to type on the slide; Esc to finish. "
                             "Hold Alt to turn off snapping; arrow keys nudge."));
-    centerL->addWidget(m_canvas, 3);
 
     auto *fmt = new QHBoxLayout;
     auto fmtButton = [&](const QString &text, const QString &tip) {
@@ -141,11 +143,26 @@ void SlideEditor::buildUi()
     auto *plain = fmtButton(tr("Clear formatting"), tr("Remove per-word formatting from the selection"));
     fmt->addStretch();
     centerL->addLayout(fmt);
+    centerL->addWidget(m_canvas, 1);
+    auto *hint = new QLabel(tr("Double-click a text box to type on the slide. Esc or click outside to finish. "
+                               "Formatting applies to the selected words, or the whole box when not typing."));
+    hint->setProperty("role", "hint");
+    hint->setWordWrap(true);
+    centerL->addWidget(hint);
 
-    m_text = new QTextEdit;
+    // The text editor lives on the canvas, over the box being edited, at the
+    // canvas's display scale, so typing happens on the slide itself.
+    m_text = new QTextEdit(m_canvas);
     m_text->setAcceptRichText(false);
-    m_text->setStyleSheet("QTextEdit { background: #1e1e1e; }");
-    centerL->addWidget(m_text, 2);
+    m_text->setFrameShape(QFrame::NoFrame);
+    m_text->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_text->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_text->setStyleSheet(QStringLiteral("QTextEdit { background: transparent; border: 1px dashed %1; }")
+                              .arg(Theme::accent.name()));
+    m_text->viewport()->setAutoFillBackground(false);
+    m_text->hide();
+    auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), m_text, nullptr, nullptr, Qt::WidgetShortcut);
+    connect(escape, &QShortcut::activated, this, &SlideEditor::stopEditing);
     split->addWidget(center);
 
     // ---- Property tabs ---------------------------------------------------
@@ -412,9 +429,10 @@ void SlideEditor::buildUi()
             s.boxes.first().rect = b->rect;
         }
         m_pres.slides.insert(++m_slide, s);
+        m_box = 0;
         refreshSlideList();
         loadSlide();
-        m_text->setFocus();
+        startEditing();
     });
     connect(dupSlide, &QToolButton::clicked, this, [this] {
         Slide s = *slide();
@@ -446,11 +464,20 @@ void SlideEditor::buildUi()
 
     connect(m_text, &QTextEdit::textChanged, this, &SlideEditor::storeText);
     auto mergeFormat = [this](const QTextCharFormat &f) {
+        const TextBox *b = box();
+        if (!b || !b->isText()) return;
         QTextCursor c = m_text->textCursor();
-        if (!c.hasSelection()) c.select(QTextCursor::WordUnderCursor);
+        if (!m_editing) c.select(QTextCursor::Document);
+        else if (!c.hasSelection()) c.select(QTextCursor::WordUnderCursor);
         c.mergeCharFormat(f);
-        m_text->mergeCurrentCharFormat(f);
+        if (m_editing) m_text->mergeCurrentCharFormat(f);
+        storeText();
     };
+    for (auto [key, button] : {std::pair{QKeySequence::Bold, bold}, std::pair{QKeySequence::Italic, italic},
+                               std::pair{QKeySequence::Underline, underline}}) {
+        auto *sc = new QShortcut(key, m_text, nullptr, nullptr, Qt::WidgetShortcut);
+        connect(sc, &QShortcut::activated, button, &QToolButton::click);
+    }
     connect(bold, &QToolButton::clicked, this, [=] {
         QTextCharFormat f;
         f.setFontWeight(m_text->currentCharFormat().fontWeight() >= QFont::DemiBold ? QFont::Normal : QFont::Bold);
@@ -475,7 +502,7 @@ void SlideEditor::buildUi()
     });
     connect(applySize, &QToolButton::clicked, this, [=] {
         QTextCharFormat f;
-        f.setProperty(QTextFormat::FontPixelSize, qMax(1, qRound(m_runSize->value() * kEditScale)));
+        f.setProperty(QTextFormat::FontPixelSize, qMax(1, qRound(m_runSize->value() * m_editScale)));
         mergeFormat(f);
     });
     connect(plain, &QToolButton::clicked, this, [this] {
@@ -532,6 +559,12 @@ void SlideEditor::buildUi()
     });
 
     // Canvas: select, move and resize boxes directly on the slide.
+    connect(m_canvas, &SlideCanvas::pressed, this, &SlideEditor::stopEditing);
+    connect(m_canvas, &SlideCanvas::layoutChanged, this, [this] {
+        if (!m_editing) return;
+        loadText();
+        placeEditor();
+    });
     connect(m_canvas, &SlideCanvas::boxSelected, this, [this](int i) {
         if (i < 0) return;
         m_box = i;
@@ -549,13 +582,15 @@ void SlideEditor::buildUi()
             m_loading = false;
         }
         updatePreview();
+        if (m_editing) placeEditor();
     });
     connect(m_canvas, &SlideCanvas::boxEditRequested, this, [this](int i) {
         m_box = i;
+        m_loading = true;
         m_boxPicker->setCurrentIndex(i);
+        m_loading = false;
         loadBox();
-        m_text->setFocus();
-        m_text->selectAll();
+        startEditing();
     });
 
     // Box properties
@@ -720,6 +755,7 @@ void SlideEditor::refreshSlideIcon(int index)
 
 void SlideEditor::loadSlide()
 {
+    stopEditing();
     m_loading = true;
     const Slide &s = *slide();
     m_label->setText(s.label);
@@ -770,7 +806,7 @@ void SlideEditor::loadBox()
     const bool isText = b && b->isText();
     m_style->setVisible(isText);
     m_boxMain->setVisible(isText);
-    m_text->setEnabled(isText);
+    if (!isText) stopEditing();
     m_imageGroup->setVisible(b && b->kind == TextBox::Kind::Image);
     m_shapeGroup->setVisible(b && b->kind == TextBox::Kind::Shape);
     m_radius->setEnabled(b && !isText);
@@ -798,10 +834,8 @@ void SlideEditor::loadText()
     const TextBox *b = box();
     m_loading = true;
     if (b) {
-        RichText::toDocument(m_text->document(), b->text, b->runs, b->style, kEditScale);
-        // The editor background is dark; make sure dark text is still visible.
-        if (b->style.color.lightness() < 60) m_text->setStyleSheet("QTextEdit { background: #c8c8c8; }");
-        else m_text->setStyleSheet("QTextEdit { background: #1e1e1e; }");
+        m_editScale = qMax(0.05, m_canvas->displayScale());
+        RichText::toDocument(m_text->document(), b->text, b->runs, b->style, m_editScale);
     } else {
         m_text->clear();
     }
@@ -813,8 +847,9 @@ void SlideEditor::storeText()
     if (m_loading) return;
     TextBox *b = box();
     if (!b) return;
-    b->runs = RichText::fromDocument(m_text->document(), b->style, kEditScale);
+    b->runs = RichText::fromDocument(m_text->document(), b->style, m_editScale);
     b->text = RichText::plainText(b->runs);
+    if (m_editing) placeEditor();
     refreshSlideIcon(m_slide);
     if (QListWidgetItem *item = m_slides->item(m_slide))
         item->setText(QStringLiteral("%1\n%2").arg(slide()->label, slide()->mainText().section('\n', 0, 0)));
@@ -885,5 +920,56 @@ void SlideEditor::updatePreview()
                               ? m_media->poster(bg.path) : QImage();
     QList<QRectF> rects;
     for (const TextBox &b : slide()->boxes) rects << b.rect;
-    m_canvas->setSlide(TextRenderer::renderSlide(*slide(), bg, kPreview, nullptr, poster), rects, m_box);
+    Slide shown = *slide();
+    if (m_editing && m_box >= 0 && m_box < shown.boxes.size()) {
+        // The live editor draws this box's text; don't draw it twice.
+        shown.boxes[m_box].text.clear();
+        shown.boxes[m_box].runs = QJsonArray();
+    }
+    m_canvas->setSlide(TextRenderer::renderSlide(shown, bg, kPreview, nullptr, poster), rects, m_box);
+    if (m_editing) placeEditor();
+}
+
+void SlideEditor::startEditing()
+{
+    const TextBox *b = box();
+    if (!b || !b->isText()) return;
+    m_editing = true;
+    loadText();
+    m_text->show();
+    placeEditor();
+    updatePreview();
+    m_text->setFocus();
+    m_text->moveCursor(QTextCursor::End);
+}
+
+void SlideEditor::stopEditing()
+{
+    if (!m_editing) return;
+    m_editing = false;
+    m_text->hide();
+    updatePreview();
+}
+
+void SlideEditor::placeEditor()
+{
+    const TextBox *b = box();
+    if (!b || m_placing) return;
+    m_placing = true;
+    const QRect r = m_canvas->boxRectInWidget(m_box).toRect();
+    m_text->setGeometry(r);
+    // Match the box's vertical alignment by padding the top of the document.
+    QTextDocument *doc = m_text->document();
+    QTextFrameFormat ff = doc->rootFrame()->frameFormat();
+    ff.setTopMargin(0);
+    doc->rootFrame()->setFrameFormat(ff);
+    doc->setTextWidth(r.width());
+    const double spare = qMax(0.0, r.height() - doc->size().height());
+    if (b->style.vAlign & Qt::AlignVCenter) ff.setTopMargin(spare / 2);
+    else if (b->style.vAlign & Qt::AlignBottom) ff.setTopMargin(spare);
+    {
+        const QSignalBlocker block(m_text);   // margins aren't content
+        doc->rootFrame()->setFrameFormat(ff);
+    }
+    m_placing = false;
 }
