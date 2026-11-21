@@ -32,6 +32,7 @@ set(SOURCES
     src/ui/ScreenSetupDialog.cpp
     src/ui/MediaBin.cpp
     src/ui/Widgets.cpp
+    src/ui/Theme.cpp
 )
 
 if(DECKLINK_SDK_DIR)

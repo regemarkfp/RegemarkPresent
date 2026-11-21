@@ -7,6 +7,7 @@
 #include "ui/MediaBin.h"
 #include "ui/ScreenSetupDialog.h"
 #include "ui/SlideEditor.h"
+#include "ui/Theme.h"
 
 #include <QAction>
 #include <QApplication>
@@ -18,7 +19,7 @@
 #include <QDragEnterEvent>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QGridLayout>
+#include <QFrame>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -30,17 +31,19 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QScrollArea>
 #include <QShortcut>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTimer>
+#include <QTabWidget>
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 static const QSize kThumb(240, 135);
-static const QSize kPreview(288, 162);
+static const QSize kPreview(272, 153);
 static const QStringList kSongExt = {"usr", "txt", "cho", "chordpro", "chopro", "pro"};
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
@@ -89,34 +92,53 @@ MainWindow::~MainWindow() = default;
 
 // ---- UI construction ------------------------------------------------------
 
+static QLabel *sectionLabel(const QString &text)
+{
+    auto *l = new QLabel(text.toUpper());
+    l->setProperty("role", "section");
+    return l;
+}
+
+static QWidget *panel(QBoxLayout *layout)
+{
+    auto *w = new QWidget;
+    w->setLayout(layout);
+    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setSpacing(8);
+    return w;
+}
+
 void MainWindow::buildUi()
 {
     auto *split = new QSplitter;
+    split->setHandleWidth(4);
     setCentralWidget(split);
 
-    // Left: library + playlist
+    // ---- Left: library tabs (songs, later Bible) + playlist --------------
     auto *left = new QSplitter(Qt::Vertical);
-    auto *libPanel = new QWidget;
-    auto *libL = new QVBoxLayout(libPanel);
-    libL->setContentsMargins(4, 4, 4, 4);
-    auto *libTitle = new QLabel(tr("<b>Library</b>"));
-    libL->addWidget(libTitle);
+    left->setHandleWidth(4);
+
+    auto *songsL = new QVBoxLayout;
     m_search = new QLineEdit;
-    m_search->setPlaceholderText(tr("Search songs (title, lyrics, CCLI #)…"));
+    m_search->setPlaceholderText(tr("Search title, lyrics, author or CCLI #"));
     m_search->setClearButtonEnabled(true);
-    libL->addWidget(m_search);
+    songsL->addWidget(m_search);
     m_libList = new QListWidget;
     m_libList->setDragEnabled(true);
-    libL->addWidget(m_libList, 1);
-    left->addWidget(libPanel);
+    songsL->addWidget(m_libList, 1);
+    auto *songsPanel = panel(songsL);
+    songsL->setContentsMargins(0, 8, 0, 0);
 
-    auto *plPanel = new QWidget;
-    auto *plL = new QVBoxLayout(plPanel);
-    plL->setContentsMargins(4, 4, 4, 4);
+    m_leftTabs = new QTabWidget;
+    m_leftTabs->addTab(songsPanel, tr("Songs"));
+    auto *libL = new QVBoxLayout;
+    libL->addWidget(m_leftTabs, 1);
+    left->addWidget(panel(libL));
+
+    auto *plL = new QVBoxLayout;
     auto *plTop = new QHBoxLayout;
-    plTop->addWidget(new QLabel(tr("<b>Playlist</b>")));
-    m_playlistBox = new QComboBox;
-    plTop->addWidget(m_playlistBox, 1);
+    plTop->addWidget(sectionLabel(tr("Playlist")));
+    plTop->addStretch();
     auto *plNew = new QToolButton;
     plNew->setText(tr("New"));
     auto *plDel = new QToolButton;
@@ -124,67 +146,94 @@ void MainWindow::buildUi()
     plTop->addWidget(plNew);
     plTop->addWidget(plDel);
     plL->addLayout(plTop);
+    m_playlistBox = new QComboBox;
+    plL->addWidget(m_playlistBox);
     m_playlist = new QListWidget;
     m_playlist->setObjectName("playlist");
     m_playlist->setDragDropMode(QAbstractItemView::InternalMove);
     plL->addWidget(m_playlist, 1);
     auto *plBtns = new QHBoxLayout;
-    auto *plAdd = new QPushButton(tr("Add song"));
+    auto *plAdd = new QPushButton(tr("+ Add song"));
     plAdd->setToolTip(tr("Add the selected library song (or double-click it)"));
-    auto *plHeader = new QPushButton(tr("Header"));
+    auto *plHeader = new QPushButton(tr("+ Header"));
     auto *plRemove = new QPushButton(tr("Remove"));
     plBtns->addWidget(plAdd);
     plBtns->addWidget(plHeader);
     plBtns->addWidget(plRemove);
     plL->addLayout(plBtns);
-    left->addWidget(plPanel);
+    left->addWidget(panel(plL));
+    left->setSizes({520, 420});
     split->addWidget(left);
 
-    // Centre: slide grid
-    auto *center = new QWidget;
-    auto *cL = new QVBoxLayout(center);
-    cL->setContentsMargins(4, 4, 4, 4);
-    m_presTitle = new QLabel(tr("Select a song from the library or playlist"));
+    // ---- Centre: slide grid -------------------------------------------------
+    auto *cL = new QVBoxLayout;
+    auto *head = new QHBoxLayout;
+    m_presTitle = new QLabel(tr("Pick a song from the library or playlist"));
+    m_presTitle->setProperty("role", "heading");
     QFont tf = m_presTitle->font();
-    tf.setPointSizeF(tf.pointSizeF() * 1.3);
+    tf.setPointSizeF(tf.pointSizeF() * 1.35);
     tf.setBold(true);
     m_presTitle->setFont(tf);
-    cL->addWidget(m_presTitle);
+    head->addWidget(m_presTitle, 1);
+    auto *editBtn = new QPushButton(tr("Edit song"));
+    editBtn->setToolTip(tr("Open the slide editor (Ctrl+E)"));
+    head->addWidget(editBtn);
+    cL->addLayout(head);
     m_grid = new QListWidget;
     m_grid->setObjectName("slideGrid");
     m_grid->setViewMode(QListView::IconMode);
     m_grid->setIconSize(kThumb + QSize(0, 24));
     m_grid->setResizeMode(QListView::Adjust);
     m_grid->setMovement(QListView::Static);
-    m_grid->setSpacing(6);
+    m_grid->setSpacing(8);
     m_grid->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_grid->setContextMenuPolicy(Qt::ActionsContextMenu);
-    m_grid->setStyleSheet("QListWidget { background: #151515; }");
     cL->addWidget(m_grid, 1);
-    split->addWidget(center);
+    split->addWidget(panel(cL));
+    connect(editBtn, &QPushButton::clicked, this, [this] { editPresentation(qMax(0, m_grid->currentRow())); });
 
-    // Right: live previews, clear buttons, media bin
-    auto *right = new QWidget;
-    auto *rL = new QVBoxLayout(right);
-    rL->setContentsMargins(4, 4, 4, 4);
-    rL->addWidget(new QLabel(tr("<b>Live outputs</b>")));
+    // ---- Right: live outputs + clear buttons over the media bin -------------
+    auto *outL = new QVBoxLayout;
+    outL->addWidget(sectionLabel(tr("Live outputs")));
     m_previewHost = new QWidget;
-    rL->addWidget(m_previewHost);
+    auto *previewScroll = new QScrollArea;
+    previewScroll->setWidget(m_previewHost);
+    previewScroll->setWidgetResizable(true);
+    previewScroll->setFrameShape(QFrame::NoFrame);
+    previewScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    outL->addWidget(previewScroll, 1);
     auto *clearRow = new QHBoxLayout;
     auto *clearAll = new QPushButton(tr("Clear all\nF1"));
-    auto *clearBg = new QPushButton(tr("Clear background\nF2"));
-    auto *clearText = new QPushButton(tr("Clear text\nF3"));
+    auto *clearBg = new QPushButton(tr("Background\nF2"));
+    auto *clearText = new QPushButton(tr("Text\nF3"));
     for (QPushButton *b : {clearAll, clearBg, clearText}) {
-        b->setMinimumHeight(48);
+        b->setMinimumHeight(46);
         clearRow->addWidget(b);
     }
-    clearAll->setStyleSheet("QPushButton { background: #7a1f1f; color: white; }");
-    rL->addLayout(clearRow);
-    rL->addWidget(new QLabel(tr("<b>Media</b> — double-click to send live")));
+    clearAll->setProperty("danger", true);
+    clearBg->setToolTip(tr("Clear the background only"));
+    clearText->setToolTip(tr("Clear the slide text only"));
+    outL->addLayout(clearRow);
+
+    auto *mediaL = new QVBoxLayout;
+    auto *mediaHead = new QHBoxLayout;
+    mediaHead->addWidget(sectionLabel(tr("Media")));
+    auto *mediaHint = new QLabel(tr("double-click to send live"));
+    mediaHint->setProperty("role", "hint");
+    mediaHead->addWidget(mediaHint);
+    mediaHead->addStretch();
+    mediaL->addLayout(mediaHead);
     m_media = new MediaBin;
-    rL->addWidget(m_media, 1);
+    mediaL->addWidget(m_media, 1);
+
+    auto *right = new QSplitter(Qt::Vertical);
+    right->setHandleWidth(4);
+    right->addWidget(panel(outL));
+    right->addWidget(panel(mediaL));
+    right->setSizes({620, 380});
     split->addWidget(right);
-    split->setSizes({300, 900, 400});
+    split->setStretchFactor(1, 1);
+    split->setSizes({320, 900, 380});
 
     // Wiring
     connect(m_search, &QLineEdit::textChanged, this, &MainWindow::refreshLibrary);
@@ -275,6 +324,12 @@ void MainWindow::buildActions()
     tb->setMovable(false);
     tb->setToolButtonStyle(Qt::ToolButtonTextOnly);
 
+    auto *brand = new QLabel;
+    brand->setText(QStringLiteral("<img src=':/icon.png' width='22' height='22' style='vertical-align:middle'>"
+                                  "&nbsp;&nbsp;<b>Regemark</b> Present&nbsp;&nbsp;&nbsp;"));
+    tb->addWidget(brand);
+    tb->addSeparator();
+
     auto add = [&](QMenu *menu, const QString &text, auto slot, const QKeySequence &key = {}, bool toolbar = true) {
         QAction *a = menu->addAction(text, this, slot);
         if (!key.isEmpty()) a->setShortcut(key);
@@ -282,11 +337,10 @@ void MainWindow::buildActions()
         return a;
     };
     add(file, tr("New song…"), [this] { newPresentation(); }, QKeySequence::New);
-    add(file, tr("New from pasted lyrics…"), [this] { newFromLyrics(); });
-    add(file, tr("Import SongSelect files…"), [this] { importSongs(); }, QKeySequence(Qt::CTRL | Qt::Key_I));
+    add(file, tr("Paste lyrics…"), [this] { newFromLyrics(); });
+    add(file, tr("Import files…"), [this] { importSongs(); }, QKeySequence(Qt::CTRL | Qt::Key_I));
     file->addSeparator();
-    tb->addSeparator();
-    add(file, tr("Edit song…"), [this] { editPresentation(qMax(0, m_grid->currentRow())); }, QKeySequence(Qt::CTRL | Qt::Key_E));
+    add(file, tr("Edit song…"), [this] { editPresentation(qMax(0, m_grid->currentRow())); }, QKeySequence(Qt::CTRL | Qt::Key_E), false);
     add(file, tr("Delete song"), [this] { deletePresentation(); }, {}, false);
     file->addSeparator();
     add(file, tr("Open library folder"), [this] {
@@ -294,14 +348,20 @@ void MainWindow::buildActions()
     }, {}, false);
     add(file, tr("Quit"), [this] { close(); }, QKeySequence::Quit, false);
 
+    auto *spacer = new QWidget;
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    tb->addWidget(spacer);
+
     QMenu *screens = menuBar()->addMenu(tr("&Screens"));
-    tb->addSeparator();
-    add(screens, tr("Screen setup…"), [this] { openScreenSetup(); });
-    QAction *outputs = add(screens, tr("Outputs on"), [this](bool on) { m_engine->setOutputsEnabled(on); },
+    add(screens, tr("Screens…"), [this] { openScreenSetup(); });
+    QAction *outputs = add(screens, tr("● Outputs live"), [this](bool on) { m_engine->setOutputsEnabled(on); },
                            QKeySequence(Qt::CTRL | Qt::Key_O));
     outputs->setCheckable(true);
     outputs->setChecked(true);
-    outputs->setToolTip(tr("Turn all physical outputs (monitors, NDI, DeckLink) on or off"));
+    outputs->setToolTip(tr("Turn all physical outputs (monitors, NDI, DeckLink) on or off (Ctrl+O)"));
+    connect(outputs, &QAction::toggled, this, [outputs](bool on) {
+        outputs->setText(on ? tr("● Outputs live") : tr("○ Outputs off"));
+    });
 
     QMenu *help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("Keyboard shortcuts"), this, [this] {
@@ -339,23 +399,33 @@ void MainWindow::buildPreviews()
     m_previews.clear();
     m_previewStatus.clear();
 
-    auto *grid = new QGridLayout(m_previewHost);
-    grid->setContentsMargins(0, 0, 0, 0);
+    auto *list = new QVBoxLayout(m_previewHost);
+    list->setContentsMargins(0, 0, 0, 0);
+    list->setSpacing(8);
     for (int i = 0; i < m_engine->screenCount(); ++i) {
         const ScreenConfig &cfg = m_engine->screenConfig(i);
-        auto *title = new QLabel(QStringLiteral("<b>%1</b> <span style='color:gray'>%2×%3 @ %4</span>")
-                                     .arg(cfg.name.toHtmlEscaped()).arg(cfg.resolution.width())
-                                     .arg(cfg.resolution.height()).arg(cfg.fps));
+        auto *card = new QFrame;
+        card->setProperty("card", true);
+        auto *cl = new QVBoxLayout(card);
+        cl->setContentsMargins(8, 6, 8, 6);
+        cl->setSpacing(4);
+        QString detail = QStringLiteral("%1×%2 · %3p").arg(cfg.resolution.width()).arg(cfg.resolution.height()).arg(cfg.fps);
+        if (cfg.name != ScreenConfig::roleName(cfg.role)) detail.prepend(ScreenConfig::roleName(cfg.role) + " · ");
+        auto *title = new QLabel(QStringLiteral("<b>%1</b>&nbsp;&nbsp;<span style='color:%2'>%3</span>")
+                                     .arg(cfg.name.toHtmlEscaped(), Theme::textDim.name(), detail));
         auto *img = new QLabel;
         img->setFixedSize(kPreview);
-        img->setStyleSheet("background: black; border: 1px solid #444;");
+        img->setStyleSheet(QStringLiteral("border-radius: 4px; background: black;"));
         auto *status = new QLabel;
-        status->setStyleSheet("color: gray; font-size: 10px;");
+        status->setProperty("role", "hint");
         status->setWordWrap(true);
-        const int row = (i / 1) * 3;
-        grid->addWidget(title, row, 0);
-        grid->addWidget(img, row + 1, 0);
-        grid->addWidget(status, row + 2, 0);
+        QFont sf = status->font();
+        sf.setPointSizeF(sf.pointSizeF() * 0.85);
+        status->setFont(sf);
+        cl->addWidget(title);
+        cl->addWidget(img, 0, Qt::AlignHCenter);
+        cl->addWidget(status);
+        list->addWidget(card);
         m_previews << img;
         m_previewStatus << status;
     }
@@ -419,7 +489,7 @@ void MainWindow::refreshPlaylistItems()
         item->setData(Qt::UserRole + 1, i.header);
         if (i.presentationId.isEmpty()) {
             item->setText(i.header.toUpper());
-            item->setForeground(QColor("#d0a040"));
+            item->setForeground(Theme::accentHover);
             QFont f = item->font();
             f.setBold(true);
             item->setFont(f);
@@ -488,7 +558,7 @@ void MainWindow::updateGridIcons()
             p.drawText(bar.adjusted(6, 0, -6, 0), Qt::AlignVCenter | Qt::AlignRight, QStringLiteral("◼ BG"));
         }
         if (isLive && i == m_show->liveIndex()) {
-            p.setPen(QPen(QColor(255, 140, 0), 6));
+            p.setPen(QPen(Theme::accent, 6));
             p.drawRect(pm.rect().adjusted(3, 3, -3, -3));
         }
         m_grid->item(i)->setIcon(QIcon(pm));
@@ -518,7 +588,7 @@ void MainWindow::refreshPreviews()
         p.end();
         m_previews[i]->setPixmap(pm);
         const QStringList st = m_engine->status(i);
-        m_previewStatus[i]->setText(st.isEmpty() ? tr("Preview only — no outputs enabled") : st.join(" · "));
+        m_previewStatus[i]->setText(st.isEmpty() ? tr("Preview only. Choose where this screen goes in Screens…") : st.join(" · "));
     }
 }
 

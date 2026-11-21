@@ -19,6 +19,7 @@
 #include <QScreen>
 #include <QScrollArea>
 #include <QSpinBox>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -58,8 +59,13 @@ ScreenSetupDialog::ScreenSetupDialog(const QList<ScreenConfig> &screens, QWidget
     remove->setText(tr("Remove"));
     btns->addWidget(add);
     btns->addWidget(remove);
+    auto *identify = new QToolButton;
+    identify->setText(tr("Identify displays"));
+    identify->setToolTip(tr("Show a big number on every connected monitor for a few seconds"));
+    connect(identify, &QToolButton::clicked, this, &ScreenSetupDialog::identifyDisplays);
     btns->addStretch();
     left->addLayout(btns);
+    left->addWidget(identify);
     body->addLayout(left);
 
     // Editor
@@ -69,6 +75,11 @@ ScreenSetupDialog::ScreenSetupDialog(const QList<ScreenConfig> &screens, QWidget
     scroll->setWidget(panel);
     body->addWidget(scroll, 1);
     auto *pl = new QVBoxLayout(panel);
+    auto *intro = new QLabel(tr("Each screen is a picture Regemark Present draws. Send it to a projector or TV, "
+                                "to NDI on the network, to a DeckLink SDI card, or to several at once."));
+    intro->setWordWrap(true);
+    intro->setProperty("role", "hint");
+    pl->addWidget(intro);
 
     auto *general = new QGroupBox(tr("Screen"));
     auto *gf = new QFormLayout(general);
@@ -78,6 +89,10 @@ ScreenSetupDialog::ScreenSetupDialog(const QList<ScreenConfig> &screens, QWidget
     for (ScreenRole r : {ScreenRole::Audience, ScreenRole::Confidence, ScreenRole::Stream})
         m_role->addItem(ScreenConfig::roleName(r));
     gf->addRow(tr("Type"), m_role);
+    m_roleHint = new QLabel;
+    m_roleHint->setWordWrap(true);
+    m_roleHint->setProperty("role", "hint");
+    gf->addRow(QString(), m_roleHint);
     m_width = new QSpinBox;
     m_width->setRange(320, 7680);
     m_height = new QSpinBox;
@@ -94,6 +109,11 @@ ScreenSetupDialog::ScreenSetupDialog(const QList<ScreenConfig> &screens, QWidget
     for (const auto &r : kRates) m_fps->addItem(r.first, r.second);
     gf->addRow(tr("Frame rate"), m_fps);
     pl->addWidget(general);
+
+    m_advanced = new QToolButton;
+    m_advanced->setText(tr("Advanced: what this screen shows ▸"));
+    m_advanced->setCheckable(true);
+    m_advanced->setToolButtonStyle(Qt::ToolButtonTextOnly);
 
     auto *look = new QGroupBox(tr("What this screen shows"));
     auto *lf = new QFormLayout(look);
@@ -120,7 +140,6 @@ ScreenSetupDialog::ScreenSetupDialog(const QList<ScreenConfig> &screens, QWidget
     m_style = new StyleEditor;
     lf->addRow(m_overrideStyle);
     lf->addRow(m_style);
-    pl->addWidget(look);
 
     m_confBox = new QGroupBox(tr("Confidence layout"));
     auto *cf = new QHBoxLayout(m_confBox);
@@ -129,17 +148,19 @@ ScreenSetupDialog::ScreenSetupDialog(const QList<ScreenConfig> &screens, QWidget
     m_showNotes = new QCheckBox(tr("Notes"));
     m_showLabel = new QCheckBox(tr("Group label"));
     for (QCheckBox *c : {m_showNext, m_showClock, m_showNotes, m_showLabel}) cf->addWidget(c);
-    pl->addWidget(m_confBox);
 
-    auto *outs = new QGroupBox(tr("Send to"));
+    auto *outs = new QGroupBox(tr("Send this screen to"));
     auto *of = new QFormLayout(outs);
-    m_dispOn = new QCheckBox(tr("Monitor / projector"));
+    m_dispOn = new QCheckBox(tr("Projector / TV / monitor"));
     m_display = new QComboBox;
-    for (QScreen *s : QGuiApplication::screens())
-        m_display->addItem(QStringLiteral("%1 — %2×%3").arg(s->name()).arg(s->size().width()).arg(s->size().height()), s->name());
+    const auto allScreens = QGuiApplication::screens();
+    for (int i = 0; i < allScreens.size(); ++i)
+        m_display->addItem(QStringLiteral("%1: %2 — %3×%4").arg(i + 1).arg(allScreens[i]->name())
+                               .arg(allScreens[i]->size().width()).arg(allScreens[i]->size().height()),
+                           allScreens[i]->name());
     of->addRow(m_dispOn, m_display);
 
-    m_ndiOn = new QCheckBox(tr("NDI"));
+    m_ndiOn = new QCheckBox(tr("NDI (network)"));
     m_ndiName = new QLineEdit;
     of->addRow(m_ndiOn, m_ndiName);
     QString ndiError;
@@ -168,7 +189,16 @@ ScreenSetupDialog::ScreenSetupDialog(const QList<ScreenConfig> &screens, QWidget
         of->addRow(QString(), warn);
     }
     pl->addWidget(outs);
+    pl->addWidget(m_advanced, 0, Qt::AlignLeft);
+    pl->addWidget(look);
+    pl->addWidget(m_confBox);
     pl->addStretch();
+    look->setVisible(false);
+    connect(m_advanced, &QToolButton::toggled, this, [this, look](bool on) {
+        look->setVisible(on);
+        m_confBox->setVisible(on && m_role->currentIndex() == int(ScreenRole::Confidence));
+        m_advanced->setText(on ? tr("Advanced: what this screen shows ▾") : tr("Advanced: what this screen shows ▸"));
+    });
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     root->addWidget(buttons);
@@ -197,7 +227,8 @@ ScreenSetupDialog::ScreenSetupDialog(const QList<ScreenConfig> &screens, QWidget
         preset->setCurrentIndex(0);
     });
     connect(m_role, &QComboBox::currentIndexChanged, this, [this](int i) {
-        m_confBox->setVisible(i == int(ScreenRole::Confidence));
+        m_confBox->setVisible(m_advanced->isChecked() && i == int(ScreenRole::Confidence));
+        m_roleHint->setText(roleDescription(ScreenRole(i)));
     });
     connect(m_overrideRect, &QCheckBox::toggled, m_rect, &QWidget::setEnabled);
     connect(m_overrideStyle, &QCheckBox::toggled, m_style, &QWidget::setEnabled);
@@ -208,13 +239,59 @@ ScreenSetupDialog::ScreenSetupDialog(const QList<ScreenConfig> &screens, QWidget
     load();
 }
 
+QString ScreenSetupDialog::roleDescription(ScreenRole r)
+{
+    switch (r) {
+    case ScreenRole::Audience:
+        return tr("What the congregation sees: lyrics, scripture and backgrounds.");
+    case ScreenRole::Confidence:
+        return tr("For the stage: current and next slide, clock and notes. Usually a TV facing the band or pastor.");
+    case ScreenRole::Stream:
+        return tr("A transparent lower third for the live stream or recording, keyed over the camera in OBS, vMix or an ATEM.");
+    }
+    return {};
+}
+
+QString ScreenSetupDialog::itemText(const ScreenConfig &s)
+{
+    QStringList to;
+    for (const OutputTarget &t : s.targets) {
+        if (!t.enabled) continue;
+        switch (t.kind) {
+        case OutputTarget::Kind::Display: to << tr("Display %1").arg(t.display); break;
+        case OutputTarget::Kind::Ndi: to << tr("NDI"); break;
+        case OutputTarget::Kind::DeckLink: to << tr("SDI"); break;
+        }
+    }
+    return QStringLiteral("%1\n→ %2").arg(s.name, to.isEmpty() ? tr("not sent anywhere yet") : to.join(" · "));
+}
+
+void ScreenSetupDialog::identifyDisplays()
+{
+    const auto screens = QGuiApplication::screens();
+    for (int i = 0; i < screens.size(); ++i) {
+        auto *w = new QLabel;
+        w->setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
+        w->setAttribute(Qt::WA_DeleteOnClose);
+        w->setAlignment(Qt::AlignCenter);
+        w->setStyleSheet(QStringLiteral("background: #a259ff; color: white; border-radius: 24px;"));
+        w->setText(QStringLiteral("<div style='font-size:120px; font-weight:800'>%1</div>"
+                                  "<div style='font-size:26px'>%2 · %3×%4</div>")
+                       .arg(i + 1).arg(screens[i]->name().toHtmlEscaped())
+                       .arg(screens[i]->size().width()).arg(screens[i]->size().height()));
+        const QRect g = screens[i]->geometry();
+        w->setGeometry(QRect(0, 0, 520, 320).translated(g.center() - QPoint(260, 160)));
+        w->show();
+        QTimer::singleShot(3500, w, &QWidget::close);
+    }
+}
+
 void ScreenSetupDialog::refreshList()
 {
     m_loading = true;
     m_list->clear();
     for (const ScreenConfig &s : std::as_const(m_screens))
-        m_list->addItem(QStringLiteral("%1\n%2 · %3×%4").arg(s.name, ScreenConfig::roleName(s.role))
-                            .arg(s.resolution.width()).arg(s.resolution.height()));
+        m_list->addItem(itemText(s));
     m_list->setCurrentRow(m_current);
     m_loading = false;
 }
@@ -239,7 +316,8 @@ void ScreenSetupDialog::load()
     const ScreenConfig &s = m_screens[m_current];
     m_name->setText(s.name);
     m_role->setCurrentIndex(int(s.role));
-    m_confBox->setVisible(s.role == ScreenRole::Confidence);
+    m_confBox->setVisible(m_advanced->isChecked() && s.role == ScreenRole::Confidence);
+    m_roleHint->setText(roleDescription(s.role));
     m_width->setValue(s.resolution.width());
     m_height->setValue(s.resolution.height());
     int fpsIndex = 4;
@@ -314,6 +392,5 @@ void ScreenSetupDialog::store()
     k.deckLinkKey = m_dlKey->isChecked();
 
     if (QListWidgetItem *item = m_list->item(m_current))
-        item->setText(QStringLiteral("%1\n%2 · %3×%4").arg(s.name, ScreenConfig::roleName(s.role))
-                          .arg(s.resolution.width()).arg(s.resolution.height()));
+        item->setText(itemText(s));
 }

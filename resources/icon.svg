@@ -1,21 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <!-- Regemark Present app icon: a stack of slides, the front one with a
-       cross cut out of it. Style: dark tile, neon-green inner border, white
-       glyph with a green edge. -->
+       cross cut out of it. Style: dark tile, neon-purple inner border, white
+       glyph with a purple edge. -->
   <rect x="20" y="20" width="472" height="472" rx="100" fill="#212121"/>
-  <rect x="50" y="50" width="412" height="412" rx="70" fill="none" stroke="#1aff8c" stroke-width="13"/>
+  <rect x="50" y="50" width="412" height="412" rx="70" fill="none" stroke="#a259ff" stroke-width="13"/>
 
   <g transform="translate(256 256) scale(1.03) translate(-264 -250)">
-  <!-- Back slide: white band with a green edge -->
-  <rect x="140" y="145" width="270" height="184" rx="30" fill="none" stroke="#1aff8c" stroke-width="38"/>
+  <!-- Back slide: white band with a purple edge -->
+  <rect x="140" y="145" width="270" height="184" rx="30" fill="none" stroke="#a259ff" stroke-width="38"/>
   <rect x="140" y="145" width="270" height="184" rx="30" fill="none" stroke="#ffffff" stroke-width="26"/>
 
-  <!-- Front slide: a dark gap cut around it, then solid white with a green edge -->
+  <!-- Front slide: a dark gap cut around it, then solid white with a purple edge -->
   <rect x="102" y="183" width="270" height="184" rx="30" fill="#212121" stroke="#212121" stroke-width="44"/>
-  <rect x="102" y="183" width="270" height="184" rx="30" fill="#ffffff" stroke="#1aff8c" stroke-width="12"/>
+  <rect x="102" y="183" width="270" height="184" rx="30" fill="#ffffff" stroke="#a259ff" stroke-width="12"/>
 
   <!-- Cross as negative space -->
   <path d="M222 209 H252 V241 H288 V271 H252 V341 H222 V271 H186 V241 H222 Z"
-        fill="#212121" stroke="#1aff8c" stroke-width="7" stroke-linejoin="miter"/>
+        fill="#212121" stroke="#a259ff" stroke-width="7" stroke-linejoin="miter"/>
   </g>
 </svg>

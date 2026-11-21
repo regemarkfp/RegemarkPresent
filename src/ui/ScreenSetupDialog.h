@@ -9,7 +9,9 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QGroupBox;
+class QLabel;
 class QLineEdit;
+class QToolButton;
 class QListWidget;
 class QSpinBox;
 class RectEditor;
@@ -28,6 +30,9 @@ private:
     void load();
     void store();
     OutputTarget &target(OutputTarget::Kind kind);
+    void identifyDisplays();
+    static QString roleDescription(ScreenRole r);
+    static QString itemText(const ScreenConfig &s);
 
     QList<ScreenConfig> m_screens;
     int m_current = -1;
@@ -38,6 +43,8 @@ private:
     QComboBox *m_role;
     QSpinBox *m_width, *m_height;
     QComboBox *m_fps;
+    QLabel *m_roleHint;
+    QToolButton *m_advanced;
 
     QCheckBox *m_showBg, *m_showText, *m_transparent;
     QCheckBox *m_overrideRect, *m_overrideStyle, *m_useBar;

@@ -11,6 +11,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QTabWidget;
 class ShowController;
 
 class MainWindow : public QMainWindow {
@@ -58,6 +59,7 @@ private:
     ShowController *m_show;
     OutputEngine *m_engine;
 
+    QTabWidget *m_leftTabs;
     QLineEdit *m_search;
     QListWidget *m_libList;
     QComboBox *m_playlistBox;
