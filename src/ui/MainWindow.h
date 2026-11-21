@@ -11,6 +11,8 @@ class BiblePanel;
 class MediaBin;
 class OutputEngine;
 class QComboBox;
+class QDialog;
+class QPushButton;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -30,6 +32,7 @@ protected:
     void dragEnterEvent(QDragEnterEvent *e) override;
     void dropEvent(QDropEvent *e) override;
     void closeEvent(QCloseEvent *e) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void buildUi();
@@ -41,6 +44,10 @@ private:
     void refreshPlaylistItems();
     void showPresentation(const QString &id, int playlistRow = -1);
     void refreshGrid();
+    void sizeGridHeaders();
+    QList<QImage> slideThumbs(const Presentation &view);
+    int viewSlideForRow(int row) const;
+    int focusGridRow(int row);
     void updateGridIcons();
     void refreshPreviews();
 
@@ -48,12 +55,13 @@ private:
     void goNext();
     void goPrevious();
 
-    void newPresentation();
-    void newFromLyrics();
+    QString newPresentation();
+    QString newFromLyrics();
     void importSongs(const QStringList &files = {});
     void importFiles(const QStringList &files, bool quiet);
-    void importDecks(const QStringList &files);
+    QStringList importDecks(const QStringList &files);
     void openSongSelect();
+    void ensureRundown();
     void ensureSongSelect();
     void editPresentation(int slideIndex = 0);
     void deletePresentation();
@@ -72,7 +80,7 @@ private:
     QStringList pickFromLibrary(bool songs);
     void addServiceSection(const QString &name);
     void removeRundownRow();
-    void newDeckPresentation();
+    QString newDeckPresentation();
     void showUnsaved(const Presentation &p);
     void refreshLookBox();
     void applyActiveLook();
@@ -91,7 +99,10 @@ private:
     ShowController *m_show;
     OutputEngine *m_engine;
 
-    QTabWidget *m_leftTabs;
+    QTabWidget *m_leftTabs;          // inside the Library window
+    QDialog *m_libraryWindow;
+    QDialog *m_bibleWindow;
+    QDialog *m_mediaWindow;
     QLineEdit *m_search;
     QListWidget *m_libList;          // songs
     QListWidget *m_deckList;         // presentations, media cues, countdown
@@ -103,7 +114,19 @@ private:
 
     QLabel *m_presTitle;
     QListWidget *m_grid;
+    // One per grid row: a slide of some item, or (slide < 0) an item's title strip.
+    struct GridEntry {
+        QString presentationId;
+        int playlistRow = -1;
+        int slide = -1;
+        QString header;
+        Slide slideData;
+    };
+    QList<GridEntry> m_gridEntries;
     QList<QImage> m_thumbs;
+    QHash<QString, QList<QImage>> m_slideThumbCache;
+    bool m_wholeRundown = false;
+    int m_liveRundownRow = -1;
     Presentation m_current;         // as stored
     Presentation m_view;            // in playing order (active arrangement)
     QList<int> m_viewMap;           // view slide -> m_current slide
@@ -120,5 +143,8 @@ private:
     MediaBin *m_media;
     SongSelectBrowser *m_songSelect = nullptr;
     QStackedWidget *m_centerStack;
-    QListWidget *m_songSelectLog;
+    QWidget *m_songSelectPage = nullptr;
+    QLabel *m_songSelectAdded = nullptr;
+    QPushButton *m_songSelectAdd = nullptr;
+    bool m_addSongSelectToRundown = false;
 };

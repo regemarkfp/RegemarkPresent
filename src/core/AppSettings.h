@@ -10,7 +10,8 @@ struct AppSettings {
     int linesPerSlide = 2;        // used when importing songs
     QString lastImportDir;
     QString defaultLookId;        // applied to new and imported songs
-    QString activeLookId;         // live look for all screens (empty = screens' own)
+    QString activeLookId;
+    bool wholeRundown = false;    // centre shows every rundown item's slides         // live look for all screens (empty = screens' own)
 
     static QString path();
     static AppSettings load();

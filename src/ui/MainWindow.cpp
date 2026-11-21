@@ -20,6 +20,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -51,6 +52,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTimer>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QToolBar>
 #include <QToolButton>
@@ -83,6 +85,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     });
     connect(m_library, &Library::presentationChanged, this, [this](const QString &id) {
         m_rundownThumbs.remove(id);
+        for (auto it = m_slideThumbCache.begin(); it != m_slideThumbCache.end();)
+            it = it.key().startsWith(id + QLatin1Char('#')) ? m_slideThumbCache.erase(it) : std::next(it);
         refreshPlaylistItems();
     });
     connect(m_library, &Library::playlistsChanged, this, &MainWindow::refreshPlaylists);
@@ -110,6 +114,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     connect(m_media, &MediaBin::createCue, this, &MainWindow::createMediaCue);
     connect(m_media, &MediaBin::posterReady, this, [this] {
         m_rundownThumbs.clear();   // video backgrounds now have a still
+        m_slideThumbCache.clear();
         refreshPlaylistItems();
         if (m_hasCurrent) refreshGrid();
     });
@@ -129,6 +134,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 }
 
 MainWindow::~MainWindow() = default;
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_grid->viewport() && event->type() == QEvent::Resize) sizeGridHeaders();
+    return QMainWindow::eventFilter(watched, event);
+}
 
 // ---- UI construction ------------------------------------------------------
 
@@ -154,9 +165,8 @@ void MainWindow::buildUi()
     split->setHandleWidth(4);
     setCentralWidget(split);
 
-    // ---- Left: library tabs (songs, later Bible) + playlist --------------
-    auto *left = new QSplitter(Qt::Vertical);
-    left->setHandleWidth(4);
+    // ---- Library window (songs, presentations): opened from the toolbar; the
+    // left side of the main window is only the rundown. -----------------------
 
     m_search = new QLineEdit;
     m_search->setPlaceholderText(tr("Search title, words, author or CCLI #"));
@@ -209,9 +219,41 @@ void MainWindow::buildUi()
     m_leftTabs = new QTabWidget;
     m_leftTabs->addTab(songsPanel, tr("Songs"));
     m_leftTabs->addTab(decksPanel, tr("Presentations"));
+    m_leftTabs->tabBar()->hide();   // Songs and Presentations are separate menu items
+    m_libraryWindow = new QDialog(this);
+    m_libraryWindow->setWindowTitle(tr("Songs"));
+    m_libraryWindow->resize(460, 700);
+    {
+        auto *l = new QVBoxLayout(m_libraryWindow);
+        auto *hint = new QLabel(tr("Click to view in the main area, double-click (or right-click) to add to the rundown."));
+        hint->setWordWrap(true);
+        hint->setProperty("role", "hint");
+        l->addWidget(hint);
+        l->addWidget(m_search);
+        l->addWidget(m_leftTabs, 1);
+        auto *row = new QHBoxLayout;
+        auto *newSong = new QPushButton(tr("+ New song"));
+        auto *paste = new QPushButton(tr("Paste lyrics"));
+        auto *import = new QPushButton(tr("Import files…"));
+        for (QPushButton *b : {newSong, paste, import}) row->addWidget(b);
+        l->addLayout(row);
+        // The Songs buttons only make sense on the Songs page.
+        connect(m_leftTabs, &QTabWidget::currentChanged, m_libraryWindow, [=](int i) {
+            for (QPushButton *b : {newSong, paste}) b->setVisible(i == 0);
+            m_libraryWindow->setWindowTitle(i == 0 ? tr("Songs") : tr("Presentations"));
+        });
+        connect(newSong, &QPushButton::clicked, this, [this] { newPresentation(); });
+        connect(paste, &QPushButton::clicked, this, [this] { newFromLyrics(); });
+        connect(import, &QPushButton::clicked, this, [this] { importSongs(); });
+    }
+
+    // ---- Bible window: look up and show scripture, or add it to the rundown.
     m_bibles = new BibleLibrary(this);
     m_biblePanel = new BiblePanel(m_bibles);
-    m_leftTabs->addTab(m_biblePanel, tr("Bible"));
+    m_bibleWindow = new QDialog(this);
+    m_bibleWindow->setWindowTitle(tr("Bible"));
+    m_bibleWindow->resize(460, 720);
+    (new QVBoxLayout(m_bibleWindow))->addWidget(m_biblePanel);
     connect(m_biblePanel, &BiblePanel::presentationReady, this, [this](const Presentation &p) {
         showUnsaved(p);
     });
@@ -219,49 +261,12 @@ void MainWindow::buildUi()
         Presentation saved = p;
         saved.id = newId();
         m_library->save(saved);
-        if (!currentPlaylist()) {
-            QMessageBox::information(this, tr("Playlist"), tr("Saved to Presentations. Create a playlist to add it to one."));
-            return;
-        }
+        ensureRundown();
         addToCurrentPlaylist(saved.id);
-        statusBar()->showMessage(tr("Added %1 to the playlist").arg(saved.title), 5000);
-    });
-    // The search box doesn't apply to the Bible tab, which has its own reference field.
-    // SongSelect tab: the site itself fills the centre; this side explains.
-    auto *ssL = new QVBoxLayout;
-    auto *ssInfo = new QLabel(tr("<b>SongSelect</b><br>Search and download in the main area with your church's "
-                                 "CCLI account. Each download goes straight into Songs."));
-    ssInfo->setWordWrap(true);
-    ssInfo->setProperty("role", "hint");
-    ssL->addWidget(ssInfo);
-    m_songSelectLog = new QListWidget;
-    m_songSelectLog->setToolTip(tr("Songs imported from SongSelect this session. Click one to open it."));
-    ssL->addWidget(sectionLabel(tr("Imported")));
-    ssL->addWidget(m_songSelectLog, 1);
-    auto *ssBack = new QPushButton(tr("Back to my songs"));
-    ssL->addWidget(ssBack);
-    auto *ssPanel = panel(ssL);
-    ssL->setContentsMargins(0, 8, 0, 0);
-    m_leftTabs->addTab(ssPanel, tr("SongSelect"));
-    connect(ssBack, &QPushButton::clicked, this, [this] { m_leftTabs->setCurrentIndex(0); });
-    connect(m_songSelectLog, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
-        m_leftTabs->setCurrentIndex(0);
-        showPresentation(item->data(Qt::UserRole).toString());
+        statusBar()->showMessage(tr("Added %1 to the rundown").arg(saved.title), 5000);
     });
 
-    connect(m_leftTabs, &QTabWidget::currentChanged, this, [this](int i) {
-        m_search->setVisible(i < 2);
-        if (i == 3) {
-            ensureSongSelect();
-            m_centerStack->setCurrentWidget(m_songSelect);
-        } else {
-            m_centerStack->setCurrentIndex(0);
-        }
-    });
-    auto *libL = new QVBoxLayout;
-    libL->addWidget(m_search);
-    libL->addWidget(m_leftTabs, 1);
-    left->addWidget(panel(libL));
+    // ---- Left: the rundown, full height ----------------------------------------
 
     auto *plL = new QVBoxLayout;
     auto *plTop = new QHBoxLayout;
@@ -291,9 +296,7 @@ void MainWindow::buildUi()
     plBtns->addWidget(plAdd, 2);
     plBtns->addWidget(plRemove, 1);
     plL->addLayout(plBtns);
-    left->addWidget(panel(plL));
-    left->setSizes({520, 420});
-    split->addWidget(left);
+    split->addWidget(panel(plL));
 
     // ---- Centre: slide grid -------------------------------------------------
     auto *cL = new QVBoxLayout;
@@ -304,6 +307,26 @@ void MainWindow::buildUi()
     tf.setPointSizeF(tf.pointSizeF() * 1.35);
     tf.setBold(true);
     m_presTitle->setFont(tf);
+    // This item / Whole rundown: one item's slides, or every item in order.
+    auto *thisItem = new QPushButton(tr("This item"));
+    auto *whole = new QPushButton(tr("Whole rundown"));
+    auto *viewGroup = new QButtonGroup(this);
+    for (QPushButton *b : {thisItem, whole}) {
+        b->setCheckable(true);
+        viewGroup->addButton(b);
+        head->addWidget(b);
+    }
+    thisItem->setToolTip(tr("Show the slides of the selected item"));
+    whole->setToolTip(tr("Show every item's slides in rundown order"));
+    m_wholeRundown = m_settings.wholeRundown;
+    (m_wholeRundown ? whole : thisItem)->setChecked(true);
+    connect(whole, &QPushButton::toggled, this, [this](bool on) {
+        m_wholeRundown = on;
+        m_settings.wholeRundown = on;
+        m_settings.save();
+        refreshGrid();
+    });
+    head->addSpacing(8);
     head->addWidget(m_presTitle, 1);
     m_arrangementBox = new QComboBox;
     m_arrangementBox->setToolTip(tr("Song order: play the groups in a different order without duplicating slides"));
@@ -341,7 +364,7 @@ void MainWindow::buildUi()
     m_centerStack = new QStackedWidget;
     m_centerStack->addWidget(panel(cL));
     split->addWidget(m_centerStack);
-    connect(editBtn, &QPushButton::clicked, this, [this] { editPresentation(qMax(0, m_grid->currentRow())); });
+    connect(editBtn, &QPushButton::clicked, this, [this] { editPresentation(qMax(0, focusGridRow(m_grid->currentRow()))); });
 
     // ---- Right: live outputs + clear buttons over the media bin -------------
     auto *outL = new QVBoxLayout;
@@ -371,25 +394,24 @@ void MainWindow::buildUi()
     outL->addWidget(timerPanel);
     connect(timerPanel, &TimerPanel::countdownSlideRequested, this, &MainWindow::showCountdownSlide);
 
-    auto *mediaL = new QVBoxLayout;
-    auto *mediaHead = new QHBoxLayout;
-    mediaHead->addWidget(sectionLabel(tr("Media")));
-    auto *mediaHint = new QLabel(tr("double-click to send live"));
-    mediaHint->setProperty("role", "hint");
-    mediaHead->addWidget(mediaHint);
-    mediaHead->addStretch();
-    mediaL->addLayout(mediaHead);
-    m_media = new MediaBin;
-    mediaL->addWidget(m_media, 1);
+    split->addWidget(panel(outL));
 
-    auto *right = new QSplitter(Qt::Vertical);
-    right->setHandleWidth(4);
-    right->addWidget(panel(outL));
-    right->addWidget(panel(mediaL));
-    right->setSizes({620, 380});
-    split->addWidget(right);
+    // ---- Media window: backgrounds, loops, photos and videos -----------------
+    m_mediaWindow = new QDialog(this);
+    m_mediaWindow->setWindowTitle(tr("Media"));
+    m_mediaWindow->resize(620, 640);
+    {
+        auto *l = new QVBoxLayout(m_mediaWindow);
+        auto *hint = new QLabel(tr("Double-click to send live. Select slides first to use “→ Slides”; "
+                                   "“New cue” adds media to the rundown."));
+        hint->setWordWrap(true);
+        hint->setProperty("role", "hint");
+        l->addWidget(hint);
+        m_media = new MediaBin;
+        l->addWidget(m_media, 1);
+    }
     split->setStretchFactor(1, 1);
-    split->setSizes({320, 900, 380});
+    split->setSizes({360, 880, 380});
 
     // Wiring
     connect(m_search, &QLineEdit::textChanged, this, &MainWindow::refreshLibrary);
@@ -458,15 +480,18 @@ void MainWindow::buildUi()
 
     connect(m_grid, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
         if (QApplication::keyboardModifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) return;
-        takeSlide(m_grid->row(item));
+        const int slide = focusGridRow(m_grid->row(item));
+        if (slide >= 0) takeSlide(slide);
     });
+    m_grid->viewport()->installEventFilter(this);
     auto *editSlide = new QAction(tr("Edit slide…"), m_grid);
-    connect(editSlide, &QAction::triggered, this, [this] { editPresentation(qMax(0, m_grid->currentRow())); });
+    connect(editSlide, &QAction::triggered, this, [this] { editPresentation(qMax(0, focusGridRow(m_grid->currentRow()))); });
     auto *clearSlideBg = new QAction(tr("Remove background from selected slides"), m_grid);
     connect(clearSlideBg, &QAction::triggered, this, [this] {
         if (!m_hasCurrent) return;
         for (QListWidgetItem *it : m_grid->selectedItems())
-            m_current.slides[m_viewMap.value(m_grid->row(it))].background = Background();
+            if (const int v = viewSlideForRow(m_grid->row(it)); v >= 0)
+                m_current.slides[m_viewMap.value(v)].background = Background();
         saveCurrent();
     });
     m_grid->addActions({editSlide, clearSlideBg});
@@ -495,14 +520,41 @@ void MainWindow::buildActions()
         if (toolbar) tb->addAction(a);
         return a;
     };
-    QAction *ss = add(file, tr("SongSelect"), [this] { openSongSelect(); }, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
-    ss->setToolTip(tr("Find songs on CCLI SongSelect; downloads go straight into your library"));
-    add(file, tr("New song…"), [this] { newPresentation(); }, QKeySequence::New);
-    add(file, tr("New presentation…"), [this] { newDeckPresentation(); }, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N));
-    add(file, tr("Paste lyrics…"), [this] { newFromLyrics(); });
-    add(file, tr("Import files…"), [this] { importSongs(); }, QKeySequence(Qt::CTRL | Qt::Key_I));
+    // Media, Songs, Presentations, Bible and SongSelect are menu items (and
+    // toolbar buttons) that open their own windows, keeping the main window
+    // to rundown, slides and outputs.
+    auto showWindow = [](QDialog *d) {
+        d->show();
+        d->raise();
+        d->activateWindow();
+    };
+    QMenu *library = menuBar()->addMenu(tr("&Library"));
+    add(library, tr("Media"), [this, showWindow] { showWindow(m_mediaWindow); }, QKeySequence(Qt::CTRL | Qt::Key_M))
+        ->setToolTip(tr("Backgrounds, loops, photos and videos (Ctrl+M)"));
+    add(library, tr("Songs"), [this, showWindow] {
+        m_leftTabs->setCurrentIndex(0);
+        showWindow(m_libraryWindow);
+    }, QKeySequence(Qt::CTRL | Qt::Key_L))->setToolTip(tr("Your songs: edit, delete, apply looks (Ctrl+L)"));
+    add(library, tr("Presentations"), [this, showWindow] {
+        m_leftTabs->setCurrentIndex(1);
+        showWindow(m_libraryWindow);
+    }, QKeySequence(Qt::CTRL | Qt::Key_P))->setToolTip(tr("Slide decks, media cues and countdowns (Ctrl+P)"));
+    add(library, tr("Bible"), [this, showWindow] { showWindow(m_bibleWindow); }, QKeySequence(Qt::CTRL | Qt::Key_B))
+        ->setToolTip(tr("Look up scripture to show now or add to the rundown (Ctrl+B)"));
+    add(library, tr("SongSelect / CCLI"), [this] {
+        m_addSongSelectToRundown = false;
+        openSongSelect();
+    }, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S))
+        ->setToolTip(tr("Find songs on CCLI SongSelect; downloads go straight into your library"));
+    tb->addSeparator();
+    add(file, tr("Import…"), [this] { importSongs(); }, QKeySequence(Qt::CTRL | Qt::Key_I))
+        ->setToolTip(tr("Songs (SongSelect files, ChordPro) and PowerPoint/PDF presentations"));
     file->addSeparator();
-    add(file, tr("Edit song…"), [this] { editPresentation(qMax(0, m_grid->currentRow())); }, QKeySequence(Qt::CTRL | Qt::Key_E), false);
+    add(file, tr("New song…"), [this] { newPresentation(); }, QKeySequence::New, false);
+    add(file, tr("New presentation…"), [this] { newDeckPresentation(); }, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), false);
+    add(file, tr("New song from pasted lyrics…"), [this] { newFromLyrics(); }, {}, false);
+    file->addSeparator();
+    add(file, tr("Edit song…"), [this] { editPresentation(qMax(0, focusGridRow(m_grid->currentRow()))); }, QKeySequence(Qt::CTRL | Qt::Key_E), false);
     add(file, tr("Delete song"), [this] { deletePresentation(); }, {}, false);
     file->addSeparator();
     add(file, tr("Open library folder"), [this] {
@@ -691,11 +743,11 @@ void MainWindow::showUnsaved(const Presentation &p)
     refreshGrid();
 }
 
-void MainWindow::newDeckPresentation()
+QString MainWindow::newDeckPresentation()
 {
     const QString title = QInputDialog::getText(this, tr("New presentation"), tr("Title:"), QLineEdit::Normal,
                                                 tr("Sermon"));
-    if (title.trimmed().isEmpty()) return;
+    if (title.trimmed().isEmpty()) return {};
     Presentation p;
     p.id = newId();
     p.title = title.trimmed();
@@ -725,6 +777,7 @@ void MainWindow::newDeckPresentation()
     m_leftTabs->setCurrentIndex(1);
     showPresentation(p.id);
     editPresentation(0);
+    return p.id;
 }
 
 void MainWindow::refreshPlaylists()
@@ -793,6 +846,7 @@ void MainWindow::refreshPlaylistItems()
         m_playlist->addItem(item);
     }
     m_playlist->setCurrentRow(qMin(row, m_playlist->count() - 1));
+    if (m_wholeRundown) refreshGrid();
 }
 
 QIcon MainWindow::rundownThumb(const Presentation &p)
@@ -839,10 +893,28 @@ QMenu *MainWindow::addItemMenu()
     auto *menu = new QMenu(this);
     menu->setAttribute(Qt::WA_DeleteOnClose);
     menu->addAction(tr("♪  Song…"), this, [this] {
-        for (const QString &id : pickFromLibrary(true)) addToCurrentPlaylist(id);
+        const QStringList picked = pickFromLibrary(true);
+        const QString action = picked.value(0);
+        if (action == "__new") addToCurrentPlaylist(newPresentation());
+        else if (action == "__paste") addToCurrentPlaylist(newFromLyrics());
+        else if (action == "__songselect") {
+            m_addSongSelectToRundown = true;   // each download goes into the rundown
+            openSongSelect();
+        } else {
+            for (const QString &id : picked) addToCurrentPlaylist(id);
+        }
     });
     menu->addAction(tr("▤  Presentation…"), this, [this] {
-        for (const QString &id : pickFromLibrary(false)) addToCurrentPlaylist(id);
+        const QStringList picked = pickFromLibrary(false);
+        const QString action = picked.value(0);
+        if (action == "__new") addToCurrentPlaylist(newDeckPresentation());
+        else if (action == "__import") {
+            const QStringList files = QFileDialog::getOpenFileNames(this, tr("Import presentations"), m_settings.lastImportDir,
+                                                                    DeckImporter::fileFilters().join(";;"));
+            for (const QString &id : importDecks(files)) addToCurrentPlaylist(id);
+        } else {
+            for (const QString &id : picked) addToCurrentPlaylist(id);
+        }
     });
     menu->addAction(tr("▶  Media (videos, photos)…"), this, [this] {
         QStringList paths = m_media->selectedPaths();
@@ -855,7 +927,8 @@ QMenu *MainWindow::addItemMenu()
         const QString ref = QInputDialog::getText(this, tr("Scripture"), tr("Reference (e.g. John 3:16-18, Johannes 3:16):"));
         if (ref.trimmed().isEmpty()) return;
         if (!m_biblePanel->showReference(ref)) {
-            m_leftTabs->setCurrentIndex(2);   // the Bible tab shows why (no Bible, bad reference...)
+            m_bibleWindow->show();   // the Bible window shows why (no Bible, bad reference...)
+            m_bibleWindow->raise();
             return;
         }
         Presentation p = m_biblePanel->currentPresentation();
@@ -890,8 +963,29 @@ QStringList MainWindow::pickFromLibrary(bool songs)
     auto *list = new QListWidget;
     list->setSelectionMode(QAbstractItemView::ExtendedSelection);
     layout->addWidget(list, 1);
+    // Not in the library yet? Make it, or fetch it, from right here.
+    QString action;
+    auto *more = new QHBoxLayout;
+    auto addAction = [&](const QString &text, const QString &key) {
+        auto *b = new QPushButton(text);
+        more->addWidget(b);
+        connect(b, &QPushButton::clicked, &dlg, [&dlg, &action, key] {
+            action = key;
+            dlg.accept();
+        });
+    };
+    if (songs) {
+        addAction(tr("+ New song"), "new");
+        addAction(tr("Paste lyrics"), "paste");
+        addAction(tr("SongSelect"), "songselect");
+    } else {
+        addAction(tr("+ New presentation"), "new");
+        addAction(tr("Import PowerPoint / PDF"), "import");
+    }
+    layout->addLayout(more);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Add"));
+    buttons->button(QDialogButtonBox::Ok)->setProperty("accent", true);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -916,6 +1010,7 @@ QStringList MainWindow::pickFromLibrary(bool songs)
     fill(QString());
     search->setFocus();
     if (dlg.exec() != QDialog::Accepted) return {};
+    if (!action.isEmpty()) return {QStringLiteral("__") + action};
     QStringList ids;
     for (int i = 0; i < list->count(); ++i)   // keep list order
         if (list->item(i)->isSelected()) ids << list->item(i)->data(Qt::UserRole).toString();
@@ -1014,47 +1109,126 @@ void MainWindow::applyDefaultLook(Presentation &p) const
     if (const Look *l = m_library->look(m_settings.defaultLookId)) p.applyLook(*l);
 }
 
-void MainWindow::refreshGrid()
+QList<QImage> MainWindow::slideThumbs(const Presentation &view)
 {
-    const int row = m_grid->currentRow();
-    m_grid->clear();
-    m_thumbs.clear();
-    if (!m_hasCurrent) return;
-    m_view = m_current.arranged(&m_viewMap);
-    // In Pre-Service everything keeps moving: slides without their own timing
-    // advance on the rundown's interval (play-once videos run to their end).
-    if (const Playlist *pl = m_library->playlist(m_playlistBox->currentData().toString());
-        pl && m_playlistRow >= 0 && pl->segmentAt(m_playlistRow) == "pre") {
-        for (int i = 0; i < m_view.slides.size(); ++i) {
-            Slide &s = m_view.slides[i];
-            const Background bg = m_view.effectiveBackground(i);
-            const bool playOnceVideo = bg.type == Background::Type::Video && !bg.loop;
-            if (s.advanceMs == 0 && !playOnceVideo) s.advanceMs = pl->preServiceAdvanceSec * 1000;
-        }
-    }
-    for (int i = 0; i < m_view.slides.size(); ++i) {
-        const Background bg = m_view.effectiveBackground(i);
+    // Cached per presentation (and arrangement): the whole-rundown view
+    // rebuilds often and would otherwise re-render every slide each time.
+    const QString key = view.id + QLatin1Char('#') + QString::number(view.activeArrangement);
+    auto it = m_slideThumbCache.constFind(key);
+    if (it != m_slideThumbCache.constEnd() && it->size() == view.slides.size()) return it.value();
+    QList<QImage> thumbs;
+    for (int i = 0; i < view.slides.size(); ++i) {
+        const Background bg = view.effectiveBackground(i);
         const QImage poster = bg.type == Background::Type::Image || bg.type == Background::Type::Video
                                   ? m_media->poster(bg.path) : QImage();
-        m_thumbs << TextRenderer::renderSlide(m_view.slides[i], bg, kThumb, nullptr, poster);
-        auto *item = new QListWidgetItem;
-        item->setSizeHint(kThumb + QSize(8, 32));
-        m_grid->addItem(item);
+        thumbs << TextRenderer::renderSlide(view.slides[i], bg, kThumb, nullptr, poster);
     }
-    m_grid->setCurrentRow(qMin(row, m_grid->count() - 1));
+    m_slideThumbCache.insert(key, thumbs);
+    return thumbs;
+}
+
+void MainWindow::refreshGrid()
+{
+    m_grid->clear();
+    m_thumbs.clear();
+    m_gridEntries.clear();
+    if (m_hasCurrent) {
+        m_view = m_current.arranged(&m_viewMap);
+        // In Pre-Service everything keeps moving: slides without their own timing
+        // advance on the rundown's interval (play-once videos run to their end).
+        if (const Playlist *pl = m_library->playlist(m_playlistBox->currentData().toString());
+            pl && m_playlistRow >= 0 && pl->segmentAt(m_playlistRow) == "pre") {
+            for (int i = 0; i < m_view.slides.size(); ++i) {
+                Slide &s = m_view.slides[i];
+                const Background bg = m_view.effectiveBackground(i);
+                const bool playOnceVideo = bg.type == Background::Type::Video && !bg.loop;
+                if (s.advanceMs == 0 && !playOnceVideo) s.advanceMs = pl->preServiceAdvanceSec * 1000;
+            }
+        }
+    }
+
+    auto addSlides = [this](const Presentation &view, int playlistRow) {
+        const QList<QImage> thumbs = slideThumbs(view);
+        for (int i = 0; i < view.slides.size(); ++i) {
+            m_gridEntries.append({view.id, playlistRow, i, QString(), view.slides[i]});
+            m_thumbs << thumbs.value(i);
+            auto *item = new QListWidgetItem;
+            item->setSizeHint(kThumb + QSize(8, 32));
+            m_grid->addItem(item);
+        }
+    };
+
+    const Playlist *pl = m_library->playlist(m_playlistBox->currentData().toString());
+    if (m_wholeRundown && pl && (m_playlistRow >= 0 || !m_hasCurrent)) {
+        // Every item's slides in rundown order, each under a full-width title strip.
+        QString segment;
+        for (int r = 0; r < pl->items.size(); ++r) {
+            const PlaylistItem &it = pl->items[r];
+            if (it.isSegment()) segment = it.header;
+            if (!it.isItem()) continue;
+            const Presentation *p = (m_hasCurrent && r == m_playlistRow) ? &m_current : m_library->find(it.presentationId);
+            if (!p) continue;
+            const Presentation view = (m_hasCurrent && r == m_playlistRow) ? m_view : p->arranged();
+            m_gridEntries.append({view.id, r, -1, QStringLiteral("%1   ·   %2").arg(segment.toUpper(), view.title), Slide()});
+            m_thumbs << QImage();
+            auto *header = new QListWidgetItem(m_gridEntries.last().header);
+            header->setFlags(Qt::ItemIsEnabled);
+            QFont f = header->font();
+            f.setBold(true);
+            header->setFont(f);
+            header->setForeground(r == m_playlistRow ? Theme::accent : Theme::textDim);
+            header->setTextAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+            m_grid->addItem(header);
+            addSlides(view, r);
+        }
+        sizeGridHeaders();
+    } else if (m_hasCurrent) {
+        addSlides(m_view, m_playlistRow);
+    }
     updateGridIcons();
+}
+
+void MainWindow::sizeGridHeaders()
+{
+    // A header as wide as the view takes a row of its own in icon mode.
+    const int w = qMax(200, m_grid->viewport()->width() - 2 * m_grid->spacing() - 4);
+    for (int i = 0; i < m_gridEntries.size() && i < m_grid->count(); ++i)
+        if (m_gridEntries[i].slide < 0) m_grid->item(i)->setSizeHint(QSize(w, 30));
+}
+
+int MainWindow::viewSlideForRow(int row) const
+{
+    // The grid row's slide in m_view, or -1 if it's a header or another item.
+    if (row < 0 || row >= m_gridEntries.size()) return -1;
+    const GridEntry &e = m_gridEntries[row];
+    if (e.slide < 0 || !m_hasCurrent || e.presentationId != m_current.id || e.playlistRow != m_playlistRow) return -1;
+    return e.slide;
+}
+
+int MainWindow::focusGridRow(int row)
+{
+    // Make the row's item the current one (whole-rundown view), return its slide.
+    if (row < 0 || row >= m_gridEntries.size()) return -1;
+    const GridEntry e = m_gridEntries[row];
+    if (viewSlideForRow(row) < 0 && e.playlistRow >= 0) {
+        m_playlist->setCurrentRow(e.playlistRow);
+        showPresentation(e.presentationId, e.playlistRow);
+    }
+    return e.slide;
 }
 
 void MainWindow::updateGridIcons()
 {
-    if (!m_hasCurrent) return;
-    const bool isLive = m_show->livePresentationId() == m_current.id;
-    for (int i = 0; i < m_thumbs.size() && i < m_grid->count(); ++i) {
-        const Slide &s = m_view.slides[i];
+    const QString liveId = m_show->livePresentationId();
+    int liveRow = -1;
+    for (int i = 0; i < m_gridEntries.size() && i < m_grid->count(); ++i) {
+        const GridEntry &e = m_gridEntries[i];
+        if (e.slide < 0) continue;
+        const Slide &s = e.slideData;
         QPixmap pm(kThumb + QSize(0, 24));
         pm.fill(QColor(30, 30, 30));
         QPainter p(&pm);
-        p.drawImage(0, 0, m_thumbs[i]);
+        p.drawImage(0, 0, m_thumbs.value(i));
         const QRect bar(0, kThumb.height(), kThumb.width(), 24);
         p.fillRect(bar, s.labelColor.isValid() ? s.labelColor : Slide::colorForLabel(s.label));
         p.setPen(Qt::white);
@@ -1062,17 +1236,20 @@ void MainWindow::updateGridIcons()
         f.setBold(true);
         p.setFont(f);
         p.drawText(bar.adjusted(6, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                   QStringLiteral("%1  %2").arg(i + 1).arg(s.label));
-        if (s.background.isSet()) {
+                   QStringLiteral("%1  %2").arg(e.slide + 1).arg(s.label));
+        if (s.background.isSet())
             p.drawText(bar.adjusted(6, 0, -6, 0), Qt::AlignVCenter | Qt::AlignRight, QStringLiteral("◼ BG"));
-        }
-        if (isLive && i == m_show->liveIndex()) {
+        // Live: same item (and, in a rundown, the same rundown row) and slide.
+        const bool live = e.presentationId == liveId && e.slide == m_show->liveIndex()
+                          && (e.playlistRow == m_liveRundownRow || m_liveRundownRow < 0);
+        if (live) {
             p.setPen(QPen(Theme::accent, 6));
             p.drawRect(pm.rect().adjusted(3, 3, -3, -3));
+            liveRow = i;
         }
         m_grid->item(i)->setIcon(QIcon(pm));
     }
-    if (isLive && m_show->liveIndex() >= 0) m_grid->scrollToItem(m_grid->item(m_show->liveIndex()));
+    if (liveRow >= 0) m_grid->scrollToItem(m_grid->item(liveRow));
 }
 
 void MainWindow::refreshPreviews()
@@ -1106,6 +1283,7 @@ void MainWindow::refreshPreviews()
 void MainWindow::takeSlide(int index)
 {
     if (!m_hasCurrent) return;
+    m_liveRundownRow = m_playlistRow;
     m_show->take(m_view, index);
 }
 
@@ -1159,10 +1337,10 @@ void MainWindow::saveCurrent()
     m_show->presentationUpdated(m_view);
 }
 
-void MainWindow::newPresentation()
+QString MainWindow::newPresentation()
 {
     const QString title = QInputDialog::getText(this, tr("New song"), tr("Title:"));
-    if (title.trimmed().isEmpty()) return;
+    if (title.trimmed().isEmpty()) return {};
     Presentation p;
     p.id = newId();
     p.title = title.trimmed();
@@ -1171,9 +1349,10 @@ void MainWindow::newPresentation()
     m_library->save(p);
     showPresentation(p.id);
     editPresentation(0);
+    return p.id;
 }
 
-void MainWindow::newFromLyrics()
+QString MainWindow::newFromLyrics()
 {
     QDialog dlg(this);
     dlg.setWindowTitle(tr("New song from lyrics"));
@@ -1188,15 +1367,16 @@ void MainWindow::newFromLyrics()
     l->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() != QDialog::Accepted) return;
+    if (dlg.exec() != QDialog::Accepted) return {};
 
     const SongImporter::Song song = SongImporter::parseSongSelectText(edit->toPlainText());
-    if (song.sections.isEmpty()) return;
+    if (song.sections.isEmpty()) return {};
     Presentation templ;
     applyDefaultLook(templ);
     const Presentation p = SongImporter::toPresentation(song, m_settings.linesPerSlide, templ);
     m_library->save(p);
     showPresentation(p.id);
+    return p.id;
 }
 
 void MainWindow::importSongs(const QStringList &given)
@@ -1228,9 +1408,9 @@ void MainWindow::importSongs(const QStringList &given)
     importFiles(files, false);
 }
 
-void MainWindow::importDecks(const QStringList &files)
+QStringList MainWindow::importDecks(const QStringList &files)
 {
-    QStringList errors;
+    QStringList errors, ids;
     QString lastId;
     for (const QString &f : files) {
         statusBar()->showMessage(tr("Importing %1…").arg(QFileInfo(f).fileName()));
@@ -1246,6 +1426,7 @@ void MainWindow::importDecks(const QStringList &files)
         }
         m_library->save(p);
         lastId = p.id;
+        ids << p.id;
     }
     if (!lastId.isEmpty()) {
         m_leftTabs->setCurrentIndex(1);
@@ -1255,6 +1436,7 @@ void MainWindow::importDecks(const QStringList &files)
         statusBar()->clearMessage();
     }
     if (!errors.isEmpty()) QMessageBox::warning(this, tr("Import"), errors.join('\n'));
+    return ids;
 }
 
 void MainWindow::importFiles(const QStringList &files, bool quiet)
@@ -1296,24 +1478,65 @@ void MainWindow::importFiles(const QStringList &files, bool quiet)
 
 void MainWindow::openSongSelect()
 {
-    m_leftTabs->setCurrentIndex(3);
+    ensureSongSelect();
+    m_songSelectAdded->setText(m_addSongSelectToRundown ? tr("Downloads go straight into the rundown")
+                                                        : tr("Downloads go into your Songs"));
+    m_centerStack->setCurrentWidget(m_songSelectPage);
+}
+
+void MainWindow::ensureRundown()
+{
+    // Adding something with no rundown yet makes today's.
+    if (currentPlaylist()) return;
+    const Playlist p = Playlist::create(QLocale().toString(QDate::currentDate(), "dddd d MMMM"));
+    m_library->savePlaylist(p);
+    m_playlistBox->setCurrentIndex(m_playlistBox->findData(p.id));
 }
 
 void MainWindow::ensureSongSelect()
 {
     // Created on first use: the embedded browser is heavy and needs the network.
     if (m_songSelect) return;
+    m_songSelectPage = new QWidget;
+    auto *l = new QVBoxLayout(m_songSelectPage);
+    l->setContentsMargins(10, 10, 10, 10);
+    auto *bar = new QHBoxLayout;
+    auto *back = new QPushButton(tr("← Back to slides"));
+    bar->addWidget(back);
+    bar->addWidget(sectionLabel(tr("SongSelect")));
+    m_songSelectAdded = new QLabel;
+    m_songSelectAdded->setProperty("role", "hint");
+    bar->addWidget(m_songSelectAdded, 1);
+    m_songSelectAdd = new QPushButton(tr("+ Add to rundown"));
+    m_songSelectAdd->setProperty("accent", true);
+    m_songSelectAdd->hide();
+    bar->addWidget(m_songSelectAdd);
+    l->addLayout(bar);
     m_songSelect = new SongSelectBrowser;
-    m_centerStack->addWidget(m_songSelect);
+    l->addWidget(m_songSelect, 1);
+    m_centerStack->addWidget(m_songSelectPage);
+    connect(back, &QPushButton::clicked, this, [this] {
+        m_addSongSelectToRundown = false;
+        m_centerStack->setCurrentIndex(0);
+    });
     connect(m_songSelect, &SongSelectBrowser::songFileReady, this, [this](const QString &path) {
         importFiles({path}, true);
         if (!m_hasCurrent) return;
-        // Newest first, without repeats, so the operator can jump to what they just got.
-        for (int i = 0; i < m_songSelectLog->count(); ++i)
-            if (m_songSelectLog->item(i)->data(Qt::UserRole).toString() == m_current.id) delete m_songSelectLog->takeItem(i);
-        auto *item = new QListWidgetItem(m_current.title);
-        item->setData(Qt::UserRole, m_current.id);
-        m_songSelectLog->insertItem(0, item);
+        m_songSelectAdded->setText(tr("In your library: %1").arg(m_current.title));
+        m_songSelectAdd->setProperty("songId", m_current.id);
+        m_songSelectAdd->show();
+        if (m_addSongSelectToRundown) {   // opened from + Add item → Song → SongSelect
+            ensureRundown();
+            addToCurrentPlaylist(m_current.id);
+            m_songSelectAdded->setText(tr("Added to the rundown: %1").arg(m_current.title));
+            m_songSelectAdd->hide();
+        }
+    });
+    connect(m_songSelectAdd, &QPushButton::clicked, this, [this] {
+        ensureRundown();
+        addToCurrentPlaylist(m_songSelectAdd->property("songId").toString());
+        m_songSelectAdded->setText(tr("Added to the rundown"));
+        m_songSelectAdd->hide();
     });
 }
 
@@ -1357,7 +1580,8 @@ void MainWindow::applyMediaToSlides(const QString &path)
         return;
     }
     for (QListWidgetItem *it : selected)
-        m_current.slides[m_viewMap.value(m_grid->row(it))].background = Background::media(path);
+        if (const int v = viewSlideForRow(m_grid->row(it)); v >= 0)
+            m_current.slides[m_viewMap.value(v)].background = Background::media(path);
     saveCurrent();
 }
 
