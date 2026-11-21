@@ -4,20 +4,30 @@
 
 class QApplication;
 
-// One place for the app's look. The accent is the same purple as the logo.
+// One place for the app's look, modelled on regemarkfp.com: near-black
+// surfaces, slanted (parallelogram) buttons, inputs, tabs and cards, bold
+// accent headings. The accent is the purple from the logo.
 namespace Theme {
 
 inline const QColor accent{0xa2, 0x59, 0xff};       // #a259ff
 inline const QColor accentHover{0xb8, 0x80, 0xff};
 inline const QColor accentDeep{0x5b, 0x2a, 0xa8};
-inline const QColor window{0x1b, 0x1b, 0x1e};
-inline const QColor panel{0x23, 0x23, 0x27};
-inline const QColor base{0x16, 0x16, 0x19};
-inline const QColor raised{0x2d, 0x2d, 0x33};
-inline const QColor border{0x38, 0x38, 0x40};
-inline const QColor text{0xe8, 0xe8, 0xee};
-inline const QColor textDim{0x8c, 0x8c, 0x99};
-inline const QColor danger{0xd9, 0x3f, 0x4c};
+inline const QColor onAccent{0x0b, 0x0b, 0x0b};     // text on accent fills, as on the site
+inline const QColor window{0x0f, 0x0f, 0x0f};       // --bg
+inline const QColor panel{0x1b, 0x1b, 0x1b};        // --panel
+inline const QColor raised{0x27, 0x27, 0x27};       // --panel2
+inline const QColor hover{0x3a, 0x3a, 0x3a};
+inline const QColor base{0x15, 0x15, 0x15};
+inline const QColor border{0x30, 0x30, 0x30};       // --line
+inline const QColor text{0xf1, 0xf1, 0xf1};         // --text
+inline const QColor textDim{0xaa, 0xaa, 0xaa};      // --dim
+inline const QColor danger{0xff, 0x3b, 0x3b};       // --live
+
+// Slant of the parallelograms, in pixels (the site's --slant family).
+constexpr double kButtonSlant = 8;
+constexpr double kInputSlant = 6;
+constexpr double kTabSlant = 7;
+constexpr double kCardSlant = 12;
 
 void apply(QApplication &app);
 

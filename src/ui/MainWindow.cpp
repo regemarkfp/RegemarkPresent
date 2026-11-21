@@ -134,7 +134,7 @@ MainWindow::~MainWindow() = default;
 
 static QLabel *sectionLabel(const QString &text)
 {
-    auto *l = new QLabel(text.toUpper());
+    auto *l = new QLabel(text);
     l->setProperty("role", "section");
     return l;
 }

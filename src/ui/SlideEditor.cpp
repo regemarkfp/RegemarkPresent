@@ -137,6 +137,7 @@ void SlideEditor::buildUi()
     m_runSize = new QSpinBox;
     m_runSize->setRange(8, 400);
     m_runSize->setSuffix(" px");
+    m_runSize->setMinimumWidth(96);
     m_runSize->setToolTip(tr("Font size for the selection (pixels at 1080p)"));
     fmt->addWidget(m_runSize);
     auto *applySize = fmtButton(tr("Apply"), tr("Apply size to selection"));
