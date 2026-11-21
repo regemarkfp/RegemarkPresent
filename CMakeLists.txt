@@ -36,6 +36,7 @@ set(SOURCES
     src/ui/Theme.cpp
     src/ui/SongSelectBrowser.cpp
     src/ui/TimerPanel.cpp
+    src/ui/SlideCanvas.cpp
 )
 
 if(DECKLINK_SDK_DIR)

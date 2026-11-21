@@ -3,6 +3,7 @@
 #include "core/RichText.h"
 #include "render/TextRenderer.h"
 #include "ui/MediaBin.h"
+#include "ui/SlideCanvas.h"
 #include "ui/Widgets.h"
 
 #include <QCheckBox>
@@ -30,7 +31,7 @@
 
 // The rich-text editor shows text at this fraction of its 1080p pixel size.
 static constexpr double kEditScale = 0.4;
-static const QSize kPreview(640, 360);
+static const QSize kPreview(960, 540);
 
 SlideEditor::SlideEditor(const Presentation &p, int startIndex, MediaBin *media, QWidget *parent)
     : QDialog(parent), m_pres(p), m_media(media)
@@ -103,10 +104,10 @@ void SlideEditor::buildUi()
     auto *center = new QWidget;
     auto *centerL = new QVBoxLayout(center);
     centerL->setContentsMargins(0, 0, 0, 0);
-    m_preview = new QLabel;
-    m_preview->setFixedSize(kPreview);
-    m_preview->setAlignment(Qt::AlignCenter);
-    centerL->addWidget(m_preview, 0, Qt::AlignHCenter);
+    m_canvas = new SlideCanvas;
+    m_canvas->setToolTip(tr("Click a text box to select it. Drag to move, drag the handles to resize. "
+                            "Hold Alt to turn off snapping; arrow keys nudge."));
+    centerL->addWidget(m_canvas, 3);
 
     auto *fmt = new QHBoxLayout;
     auto fmtButton = [&](const QString &text, const QString &tip) {
@@ -140,7 +141,7 @@ void SlideEditor::buildUi()
     m_text = new QTextEdit;
     m_text->setAcceptRichText(false);
     m_text->setStyleSheet("QTextEdit { background: #1e1e1e; }");
-    centerL->addWidget(m_text, 1);
+    centerL->addWidget(m_text, 2);
     split->addWidget(center);
 
     // ---- Property tabs ---------------------------------------------------
@@ -430,6 +431,33 @@ void SlideEditor::buildUi()
         loadSlide();
     });
 
+    // Canvas: select, move and resize boxes directly on the slide.
+    connect(m_canvas, &SlideCanvas::boxSelected, this, [this](int i) {
+        if (i < 0) return;
+        m_box = i;
+        m_loading = true;
+        m_boxPicker->setCurrentIndex(i);
+        m_loading = false;
+        loadBox();
+    });
+    connect(m_canvas, &SlideCanvas::boxMoved, this, [this](int i, const QRectF &r) {
+        if (i < 0 || i >= slide()->boxes.size()) return;
+        slide()->boxes[i].rect = r;
+        if (i == m_box) {
+            m_loading = true;
+            m_rect->setRect(r);
+            m_loading = false;
+        }
+        updatePreview();
+    });
+    connect(m_canvas, &SlideCanvas::boxEditRequested, this, [this](int i) {
+        m_box = i;
+        m_boxPicker->setCurrentIndex(i);
+        loadBox();
+        m_text->setFocus();
+        m_text->selectAll();
+    });
+
     // Box properties
     connect(m_boxPicker, &QComboBox::currentIndexChanged, this, [this](int i) {
         if (m_loading || i < 0) return;
@@ -652,13 +680,7 @@ void SlideEditor::updatePreview()
     const Background bg = m_pres.effectiveBackground(m_slide);
     const QImage poster = bg.type == Background::Type::Image || bg.type == Background::Type::Video
                               ? m_media->poster(bg.path) : QImage();
-    QImage img = TextRenderer::renderSlide(*slide(), bg, kPreview, nullptr, poster);
-    // Outline the box being edited.
-    if (const TextBox *b = box()) {
-        QPainter p(&img);
-        p.setPen(QPen(QColor(255, 170, 0), 1, Qt::DashLine));
-        p.drawRect(QRectF(b->rect.x() * kPreview.width(), b->rect.y() * kPreview.height(),
-                          b->rect.width() * kPreview.width(), b->rect.height() * kPreview.height()));
-    }
-    m_preview->setPixmap(QPixmap::fromImage(img));
+    QList<QRectF> rects;
+    for (const TextBox &b : slide()->boxes) rects << b.rect;
+    m_canvas->setSlide(TextRenderer::renderSlide(*slide(), bg, kPreview, nullptr, poster), rects, m_box);
 }

@@ -15,6 +15,7 @@ class QPlainTextEdit;
 class QSpinBox;
 class QTextEdit;
 class RectEditor;
+class SlideCanvas;
 class StyleEditor;
 
 // Edits a whole presentation: slide list, rich text per box, box layout and
@@ -47,7 +48,7 @@ private:
 
     QLineEdit *m_title, *m_author, *m_copyright, *m_ccli;
     QListWidget *m_slides;
-    QLabel *m_preview;
+    SlideCanvas *m_canvas;
     QTextEdit *m_text;
     QSpinBox *m_runSize;
 

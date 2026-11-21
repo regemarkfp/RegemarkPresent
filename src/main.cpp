@@ -1,5 +1,8 @@
 #include "core/AppSettings.h"
+#include "core/Library.h"
 #include "ui/MainWindow.h"
+#include "ui/MediaBin.h"
+#include "ui/SlideEditor.h"
 #include "ui/ScreenSetupDialog.h"
 #include "ui/Theme.h"
 
@@ -27,6 +30,8 @@ int main(int argc, char *argv[])
     args.addOption(grab);
     QCommandLineOption grabScreens("grab-screens", "Save a screenshot of the screen setup dialog to <file> and exit (diagnostics).", "file");
     args.addOption(grabScreens);
+    QCommandLineOption grabEditor("grab-editor", "Save a screenshot of the slide editor (first song) to <file> and exit (diagnostics).", "file");
+    args.addOption(grabEditor);
     args.process(app);
 
     if (args.isSet(grabScreens)) {
@@ -34,6 +39,21 @@ int main(int argc, char *argv[])
         dlg.show();
         QTimer::singleShot(1200, &dlg, [&] {
             dlg.grab().save(args.value(grabScreens));
+            QApplication::exit(0);
+        });
+        return app.exec();
+    }
+
+    if (args.isSet(grabEditor)) {
+        Library library(qEnvironmentVariable("RP_LIBRARY_DIR"));
+        library.load();
+        const QList<Presentation> songs = library.presentations();
+        if (songs.isEmpty()) return 1;
+        MediaBin media;
+        SlideEditor editor(songs.first(), 1, &media);
+        editor.show();
+        QTimer::singleShot(1500, &editor, [&] {
+            editor.grab().save(args.value(grabEditor));
             QApplication::exit(0);
         });
         return app.exec();
