@@ -4,7 +4,7 @@
 
 Presentation software for running church services. You build songs and slides, then send them to several screens at the same time: projectors and monitors through the graphics card, NDI over the network, and SDI through Blackmagic DeckLink cards.
 
-## What it does (v0.3)
+## What it does (v0.4)
 
 **Songs**
 - Library with search (title, lyrics, author, CCLI #), looks you can apply to many songs, and a default look for new songs
@@ -30,6 +30,9 @@ Presentation software for running church services. You build songs and slides, t
 - **Media cues and announcement loops**: videos with sound, images that advance every N seconds, and looping
 - **Timer**: a countdown for a set length or until a time, shown on the confidence screen. `{timer}`, `{clock}` and `{date}` work in any slide text, and there's a one-click "Service starts in" slide
 - Clear all / background / text (F1 / F2 / F3) and keyboard control
+
+**Looks**
+- Looks per screen, like ProPresenter: a look says what every screen shows (backgrounds/text, position, style, lower-third band, confidence layout). Switch looks live from the toolbar; edit them under Looks → Edit looks… with a true-to-output preview per screen
 
 **Screens and outputs**
 - **Audience**, **Confidence** (current and next slide, clock, timer, notes) and **Stream overlay** (transparent lower third)
