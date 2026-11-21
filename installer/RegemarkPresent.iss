@@ -1,6 +1,6 @@
 ; Inno Setup script for the Windows installer.
 ; Built by CI after windeployqt has staged everything into ..\deploy:
-;   iscc /DAppVersion=0.1.0 installer\ChurchPresenter.iss
+;   iscc /DAppVersion=0.1.0 installer\RegemarkPresent.iss
 
 #ifndef AppVersion
   #define AppVersion "0.1.0"
@@ -8,14 +8,14 @@
 
 [Setup]
 AppId={{6F1C2E4A-8B7D-4C55-9E2A-3D1F0B7A9C10}
-AppName=ChurchPresenter
+AppName=Regemark Present
 AppVersion={#AppVersion}
-AppPublisher=ChurchPresenter
-DefaultDirName={autopf}\ChurchPresenter
-DefaultGroupName=ChurchPresenter
-UninstallDisplayIcon={app}\ChurchPresenter.exe
+AppPublisher=Regemark
+DefaultDirName={autopf}\Regemark Present
+DefaultGroupName=Regemark Present
+UninstallDisplayIcon={app}\RegemarkPresent.exe
 OutputDir=..\dist
-OutputBaseFilename=ChurchPresenter-{#AppVersion}-Setup
+OutputBaseFilename=RegemarkPresent-{#AppVersion}-Setup
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -30,13 +30,13 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\deploy\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\ChurchPresenter"; Filename: "{app}\ChurchPresenter.exe"
-Name: "{group}\Uninstall ChurchPresenter"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\ChurchPresenter"; Filename: "{app}\ChurchPresenter.exe"; Tasks: desktopicon
+Name: "{group}\Regemark Present"; Filename: "{app}\RegemarkPresent.exe"
+Name: "{group}\Uninstall Regemark Present"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Regemark Present"; Filename: "{app}\RegemarkPresent.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ runtime..."; Check: VCRedistNeeded; Flags: waituntilterminated skipifdoesntexist
-Filename: "{app}\ChurchPresenter.exe"; Description: "{cm:LaunchProgram,ChurchPresenter}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\RegemarkPresent.exe"; Description: "{cm:LaunchProgram,Regemark Present}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 function VCRedistNeeded(): Boolean;

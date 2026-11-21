@@ -1,4 +1,4 @@
-# ChurchPresenter
+# Regemark Present
 
 Presentation software for running church services. You build songs and slides, then send them to several screens at the same time: projectors and monitors through the graphics card, NDI over the network, and SDI through Blackmagic DeckLink cards.
 
@@ -53,14 +53,14 @@ Needs Qt 6.4 or later (Widgets and Multimedia), CMake 3.21 or later, and a C++17
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
-./build/ChurchPresenter
+./build/RegemarkPresent
 ```
 
-**Windows installer:** push to GitHub, and `.github/workflows/windows.yml` builds the app with MSVC and Qt 6.8, runs the self-test, runs windeployqt, and outputs `ChurchPresenter-x.y.z-Setup.exe`. Push a `v*` tag to attach the installer to a release.
+**Windows installer:** push to GitHub, and `.github/workflows/windows.yml` builds the app with MSVC and Qt 6.8, runs the self-test, runs windeployqt, and outputs `RegemarkPresent-x.y.z-Setup.exe`. Push a `v*` tag to attach the installer to a release.
 
 Data locations:
-- Library: `Documents/ChurchPresenter`. Each song is a `.cpres` file and each playlist a `.cplist` file, both readable JSON. Override this folder with `CP_LIBRARY_DIR`.
-- Settings: `%APPDATA%/ChurchPresenter/ChurchPresenter/settings.json` on Windows, or `~/.config/ChurchPresenter/ChurchPresenter/settings.json` on Linux.
+- Library: `Documents/Regemark Present`. Each song is a `.rpres` file and each playlist a `.rplist` file, both readable JSON. Override this folder with `RP_LIBRARY_DIR`.
+- Settings: `%APPDATA%/Regemark/Regemark Present/settings.json` on Windows, or `~/.config/Regemark/Regemark Present/settings.json` on Linux.
 
 ## Code layout
 

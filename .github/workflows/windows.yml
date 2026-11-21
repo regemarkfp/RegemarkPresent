@@ -56,19 +56,19 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory deploy | Out-Null
-          Copy-Item build/ChurchPresenter.exe deploy/
-          windeployqt --release --no-translations --compiler-runtime deploy/ChurchPresenter.exe
+          Copy-Item build/RegemarkPresent.exe deploy/
+          windeployqt --release --no-translations --compiler-runtime deploy/RegemarkPresent.exe
           Copy-Item README.md deploy/
 
       - name: Build installer
         shell: pwsh
         run: |
-          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(ChurchPresenter VERSION ([0-9.]+)').Matches[0].Groups[1].Value
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\iscc.exe" /DAppVersion=$version installer\ChurchPresenter.iss
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(RegemarkPresent VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\iscc.exe" /DAppVersion=$version installer\RegemarkPresent.iss
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ChurchPresenter-Setup
+          name: RegemarkPresent-Setup
           path: dist/*.exe
 
       - name: Attach to release

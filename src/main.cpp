@@ -32,9 +32,9 @@ static void applyDarkTheme(QApplication &app)
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
-    QApplication::setOrganizationName("ChurchPresenter");
-    QApplication::setApplicationName("ChurchPresenter");
-    QApplication::setApplicationVersion(CP_VERSION);
+    QApplication::setOrganizationName("Regemark");
+    QApplication::setApplicationName("Regemark Present");
+    QApplication::setApplicationVersion(RP_VERSION);
     // Closing an output window must not quit the app; MainWindow quits explicitly.
     QApplication::setQuitOnLastWindowClosed(false);
     applyDarkTheme(app);

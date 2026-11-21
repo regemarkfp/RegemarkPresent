@@ -26,7 +26,7 @@ QJsonObject Playlist::toJson() const
     for (const PlaylistItem &i : items)
         a.append(i.presentationId.isEmpty() ? QJsonObject{{"header", i.header}}
                                             : QJsonObject{{"presentation", i.presentationId}});
-    return {{"format", "churchpresenter.playlist"}, {"id", id}, {"name", name}, {"items", a}};
+    return {{"format", "regemarkpresent.playlist"}, {"id", id}, {"name", name}, {"items", a}};
 }
 
 Playlist Playlist::fromJson(const QJsonObject &o)
@@ -49,20 +49,20 @@ Library::Library(const QString &root, QObject *parent)
     QDir().mkpath(m_root + "/Media");
 }
 
-QString Library::presPath(const QString &id) const { return m_root + "/Presentations/" + id + ".cpres"; }
-QString Library::playlistPath(const QString &id) const { return m_root + "/Playlists/" + id + ".cplist"; }
+QString Library::presPath(const QString &id) const { return m_root + "/Presentations/" + id + ".rpres"; }
+QString Library::playlistPath(const QString &id) const { return m_root + "/Playlists/" + id + ".rplist"; }
 
 void Library::load()
 {
     m_presentations.clear();
     const QDir pd(m_root + "/Presentations");
-    for (const QString &f : pd.entryList({"*.cpres"}, QDir::Files)) {
+    for (const QString &f : pd.entryList({"*.rpres"}, QDir::Files)) {
         Presentation p = Presentation::fromJson(readJson(pd.filePath(f)));
         if (!p.id.isEmpty()) m_presentations.insert(p.id, p);
     }
     m_playlists.clear();
     const QDir ld(m_root + "/Playlists");
-    for (const QString &f : ld.entryList({"*.cplist"}, QDir::Files))
+    for (const QString &f : ld.entryList({"*.rplist"}, QDir::Files))
         m_playlists.append(Playlist::fromJson(readJson(ld.filePath(f))));
     std::sort(m_playlists.begin(), m_playlists.end(),
               [](const Playlist &a, const Playlist &b) { return a.name < b.name; });

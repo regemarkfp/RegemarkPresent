@@ -271,7 +271,7 @@ void ScreenSetupDialog::load()
     m_display->setCurrentIndex(di >= 0 ? di : qMin(1, m_display->count() - 1));
     const OutputTarget &n = target(OutputTarget::Kind::Ndi);
     m_ndiOn->setChecked(n.enabled);
-    m_ndiName->setText(n.ndiName.isEmpty() ? QStringLiteral("ChurchPresenter %1").arg(s.name) : n.ndiName);
+    m_ndiName->setText(n.ndiName.isEmpty() ? QStringLiteral("Regemark Present %1").arg(s.name) : n.ndiName);
     const OutputTarget &k = target(OutputTarget::Kind::DeckLink);
     m_dlOn->setChecked(k.enabled);
     m_deckLink->setCurrentIndex(qBound(0, k.deckLinkDevice, m_deckLink->count() - 1));

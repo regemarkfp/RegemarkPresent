@@ -20,7 +20,7 @@ struct Playlist {
 };
 
 // File-backed store: one JSON file per presentation / playlist under
-// Documents/ChurchPresenter so libraries are easy to back up or sync.
+// Documents/Regemark Present so libraries are easy to back up or sync.
 class Library : public QObject {
     Q_OBJECT
 public:

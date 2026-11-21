@@ -278,7 +278,7 @@ QJsonObject Presentation::toJson() const
     QJsonArray s;
     for (const Slide &slide : slides) s.append(slide.toJson());
     return {
-        {"format", "churchpresenter.presentation"}, {"version", 1},
+        {"format", "regemarkpresent.presentation"}, {"version", 1},
         {"id", id}, {"title", title}, {"author", author}, {"copyright", copyright},
         {"ccli", ccliNumber}, {"category", category}, {"slides", s},
         {"defaultBackground", defaultBackground.toJson()},

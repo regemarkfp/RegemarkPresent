@@ -106,7 +106,7 @@ ScreenConfig ScreenConfig::defaults(ScreenRole role)
     display.kind = OutputTarget::Kind::Display;
     OutputTarget ndi;
     ndi.kind = OutputTarget::Kind::Ndi;
-    ndi.ndiName = QStringLiteral("ChurchPresenter %1").arg(s.name);
+    ndi.ndiName = QStringLiteral("Regemark Present %1").arg(s.name);
     OutputTarget dl;
     dl.kind = OutputTarget::Kind::DeckLink;
     s.targets = {display, ndi, dl};

@@ -45,13 +45,13 @@ static const QStringList kSongExt = {"usr", "txt", "cho", "chordpro", "chopro", 
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
-    setWindowTitle(QStringLiteral("ChurchPresenter %1").arg(CP_VERSION));
+    setWindowTitle(QStringLiteral("Regemark Present %1").arg(RP_VERSION));
     setAcceptDrops(true);
     resize(1600, 950);
 
     m_settings = AppSettings::load();
-    QString root = qEnvironmentVariable("CP_LIBRARY_DIR");
-    if (root.isEmpty()) root = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/ChurchPresenter";
+    QString root = qEnvironmentVariable("RP_LIBRARY_DIR");
+    if (root.isEmpty()) root = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/Regemark Present";
     m_library = new Library(root, this);
     m_show = new ShowController(this);
     m_engine = new OutputEngine(m_show, this);
@@ -313,10 +313,10 @@ void MainWindow::buildActions()
                "Tip: drag SongSelect downloads (.usr / .txt / ChordPro) onto the window to import them."));
     });
     help->addAction(tr("About"), this, [this] {
-        QMessageBox::about(this, tr("About ChurchPresenter"),
-            tr("ChurchPresenter %1\n\nNDI® is a registered trademark of Vizrt NDI AB.\n"
+        QMessageBox::about(this, tr("About Regemark Present"),
+            tr("Regemark Present %1\n\nNDI® is a registered trademark of Vizrt NDI AB.\n"
                "DeckLink is a trademark of Blackmagic Design Pty. Ltd.\n"
-               "SongSelect and CCLI are trademarks of Christian Copyright Licensing International.").arg(CP_VERSION));
+               "SongSelect and CCLI are trademarks of Christian Copyright Licensing International.").arg(RP_VERSION));
     });
 
     auto shortcut = [this](const QKeySequence &k, auto fn) {
