@@ -5,6 +5,8 @@
 
 #include <QMainWindow>
 
+class BibleLibrary;
+class BiblePanel;
 class MediaBin;
 class OutputEngine;
 class QComboBox;
@@ -57,6 +59,13 @@ private:
     void addToCurrentPlaylist(const QString &presentationId);
     void createMediaCue(const QStringList &paths);
     void showCountdownSlide();
+    void newDeckPresentation();
+    void showUnsaved(const Presentation &p);
+    QListWidget *activeLibraryList() const;
+    void refreshArrangements();
+    void editArrangement(int index);
+    void applyLookToSelection(const Look &look);
+    void applyDefaultLook(Presentation &p) const;
 
     Playlist *currentPlaylist();
 
@@ -67,7 +76,10 @@ private:
 
     QTabWidget *m_leftTabs;
     QLineEdit *m_search;
-    QListWidget *m_libList;
+    QListWidget *m_libList;          // songs
+    QListWidget *m_deckList;         // presentations, media cues, countdown
+    BibleLibrary *m_bibles;
+    BiblePanel *m_biblePanel;
     QComboBox *m_playlistBox;
     QListWidget *m_playlist;
     Playlist m_playlistCache;
@@ -75,7 +87,10 @@ private:
     QLabel *m_presTitle;
     QListWidget *m_grid;
     QList<QImage> m_thumbs;
-    Presentation m_current;
+    Presentation m_current;         // as stored
+    Presentation m_view;            // in playing order (active arrangement)
+    QList<int> m_viewMap;           // view slide -> m_current slide
+    QComboBox *m_arrangementBox;
     bool m_hasCurrent = false;
     int m_playlistRow = -1;
 

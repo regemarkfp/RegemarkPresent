@@ -7,6 +7,7 @@
 #include "import/SongImporter.h"
 #include "render/MediaPool.h"
 #include "render/ScreenRenderer.h"
+#include "render/TextRenderer.h"
 #include "show/ShowController.h"
 #include "show/ShowTimer.h"
 
@@ -170,6 +171,54 @@ static void testShowFeatures()
     CHECK(!ShowTimer::hasTokens("plain"));
 }
 
+static void testDecksAndArrangements()
+{
+    // Image and shape elements round-trip.
+    Presentation deck;
+    deck.category = "Presentation";
+    Slide s = deck.makeSlide("Slide 1", "Welcome");
+    s.boxes.append(TextBox::image("/x/logo.png"));
+    TextBox shape = TextBox::shape(QColor(0, 0, 0, 150));
+    shape.opacity = 0.5;
+    s.boxes.prepend(shape);
+    deck.slides.append(s);
+    const Presentation back = Presentation::fromJson(deck.toJson());
+    CHECK(back.slides[0].boxes.size() == 3);
+    CHECK(back.slides[0].boxes[0].kind == TextBox::Kind::Shape);
+    CHECK(qAbs(back.slides[0].boxes[0].opacity - 0.5) < 1e-6);
+    CHECK(back.slides[0].boxes[2].kind == TextBox::Kind::Image);
+    CHECK(back.slides[0].boxes[2].imagePath == "/x/logo.png");
+    CHECK(back.slides[0].mainText() == "Welcome");   // shapes/images aren't "text"
+
+    // Shapes render as solid colour; images that don't exist render nothing.
+    const QImage panel = TextRenderer::renderBox(TextBox::shape(Qt::red), TextStyle(), QSize(100, 50), 1.0);
+    CHECK(qRed(panel.pixel(50, 25)) == 255 && qAlpha(panel.pixel(50, 25)) == 255);
+
+    // Arrangements: play order, persistence, background carry-forward in play order.
+    Presentation song = SongImporter::toPresentation(SongImporter::parseSongSelectText(kSongSelectTxt), 2, Presentation());
+    CHECK(song.groups() == QStringList({"Verse 1", "Verse 2", "Chorus"}));
+    song.arrangements.append({"Sunday", {"Verse 1", "Chorus", "Verse 2", "Chorus", "Chorus"}});
+    song.activeArrangement = 0;
+    QList<int> map;
+    const Presentation played = song.arranged(&map);
+    // V1 = 2 slides, Chorus = 2, V2 = 1 -> 2 + 2 + 1 + 2 + 2
+    CHECK(played.slides.size() == 9);
+    CHECK(map.value(2) == 3 && map.value(4) == 2);
+    CHECK(played.slides[4].label == "Verse 2");
+    const Presentation again = Presentation::fromJson(song.toJson());
+    CHECK(again.activeArrangement == 0 && again.arrangements.value(0).groups.size() == 5);
+
+    // Looks restyle every main box and set the defaults.
+    Look look;
+    look.style.fontSize = 55;
+    look.rect = QRectF(0.1, 0.7, 0.8, 0.2);
+    look.background = Background::solid(Qt::darkGreen);
+    song.applyLook(look);
+    CHECK(song.slides[3].boxes[0].style.fontSize == 55);
+    CHECK(song.slides[3].boxes[0].rect == look.rect);
+    CHECK(song.defaultBackground.color == QColor(Qt::darkGreen));
+}
+
 static QString makeBackground(const QString &dir)
 {
     QImage img(1920, 1080, QImage::Format_RGB32);
@@ -252,6 +301,7 @@ int main(int argc, char **argv)
     testImporters();
     testModel();
     testShowFeatures();
+    testDecksAndArrangements();
     testRender(out);
     std::printf("%s (%d failures), renders in %s\n", failures ? "FAILED" : "OK", failures, qPrintable(out));
     return failures ? 1 : 0;

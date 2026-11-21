@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Multimedia)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Multimedia Network)
 
 # DeckLink needs the Blackmagic Desktop Video SDK headers at build time.
 # Download it from blackmagicdesign.com/developer and point this at the SDK root.
@@ -28,6 +28,14 @@ set(SOURCES
     src/output/NdiOutput.cpp
     src/output/OutputEngine.cpp
     src/import/SongImporter.cpp
+    src/bible/BookNames.cpp
+    src/bible/Bible.cpp
+    src/bible/Reference.cpp
+    src/bible/Scripture.cpp
+    src/bible/BibleLibrary.cpp
+    src/bible/ZefaniaCatalog.cpp
+    src/bible/BibleDownloadDialog.cpp
+    src/bible/BiblePanel.cpp
     src/ui/MainWindow.cpp
     src/ui/SlideEditor.cpp
     src/ui/ScreenSetupDialog.cpp
@@ -37,6 +45,7 @@ set(SOURCES
     src/ui/SongSelectBrowser.cpp
     src/ui/TimerPanel.cpp
     src/ui/SlideCanvas.cpp
+    src/ui/ArrangementDialog.cpp
 )
 
 if(DECKLINK_SDK_DIR)
@@ -65,7 +74,7 @@ endif()
 # Everything except main() lives in a static library so tests can link it.
 add_library(rpcore STATIC ${SOURCES})
 target_include_directories(rpcore PUBLIC src)
-target_link_libraries(rpcore PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia)
+target_link_libraries(rpcore PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network)
 target_compile_definitions(rpcore PUBLIC RP_VERSION="${PROJECT_VERSION}")
 
 # Optional: SongSelect opens inside the app when Qt WebEngine is available;
@@ -102,6 +111,10 @@ if(RP_BUILD_TESTS)
     target_link_libraries(rp_selftest PRIVATE rpcore)
     add_test(NAME selftest COMMAND rp_selftest ${CMAKE_BINARY_DIR}/selftest-out)
     set_tests_properties(selftest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    qt_add_executable(rp_bibletest tests/bibletest.cpp)
+    target_link_libraries(rp_bibletest PRIVATE rpcore)
+    add_test(NAME bibletest COMMAND rp_bibletest)
+    set_tests_properties(bibletest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 install(TARGETS RegemarkPresent RUNTIME DESTINATION .)

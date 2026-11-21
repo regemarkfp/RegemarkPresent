@@ -3,7 +3,9 @@
 #include "core/RichText.h"
 #include "show/ShowTimer.h"
 
+#include <QHash>
 #include <QPainter>
+#include <QPainterPath>
 #include <QTextDocument>
 
 namespace TextRenderer {
@@ -36,7 +38,67 @@ static TextBox expandTokens(const TextBox &box)
     return b;
 }
 
+static QImage renderText(const TextBox &source, const TextStyle &style, QSize size, double scale);
+
+static QImage cachedImage(const QString &path)
+{
+    // Slide decks reuse the same photos and logos; decode each once.
+    static QHash<QString, QImage> cache;
+    auto it = cache.constFind(path);
+    if (it != cache.constEnd()) return it.value();
+    QImage img(path);
+    if (img.width() > 3840 || img.height() > 3840)
+        img = img.scaled(3840, 3840, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    if (cache.size() > 64) cache.clear();
+    cache.insert(path, img);
+    return img;
+}
+
+static QImage renderGraphic(const TextBox &box, QSize size, double scale)
+{
+    QImage out(size, QImage::Format_ARGB32_Premultiplied);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
+    p.setOpacity(box.opacity);
+    if (box.kind == TextBox::Kind::Shape) {
+        p.setPen(Qt::NoPen);
+        p.setBrush(box.fill);
+        const double r = qMin(box.cornerRadius * scale, qMin(size.width(), size.height()) / 2.0);
+        p.drawRoundedRect(QRectF(QPointF(0, 0), QSizeF(size)), r, r);
+    } else {
+        Background as;
+        as.type = Background::Type::Image;
+        as.fit = box.imageFit;
+        const double r = box.cornerRadius * scale;
+        if (r > 0) {
+            QPainterPath clip;
+            clip.addRoundedRect(QRectF(QPointF(0, 0), QSizeF(size)), r, r);
+            p.setClipPath(clip);
+        }
+        drawBackground(p, out.rect(), as, cachedImage(box.imagePath));
+    }
+    return out;
+}
+
+static QImage withOpacity(const QImage &img, double opacity)
+{
+    if (opacity >= 1.0) return img;
+    QImage out(img.size(), QImage::Format_ARGB32_Premultiplied);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setOpacity(opacity);
+    p.drawImage(0, 0, img);
+    return out;
+}
+
 QImage renderBox(const TextBox &source, const TextStyle &style, QSize size, double scale)
+{
+    if (!source.isText()) return renderGraphic(source, size, scale);
+    return withOpacity(renderText(source, style, size, scale), source.opacity);
+}
+
+static QImage renderText(const TextBox &source, const TextStyle &style, QSize size, double scale)
 {
     const TextBox box = ShowTimer::hasTokens(source.text) ? expandTokens(source) : source;
     QImage text(size, QImage::Format_ARGB32_Premultiplied);
@@ -152,7 +214,7 @@ QImage renderSlide(const Slide &slide, const Background &bg, QSize size,
         const QRectF r = effectiveRect(box, look);
         const QRect px(qRound(r.x() * size.width()), qRound(r.y() * size.height()),
                        qRound(r.width() * size.width()), qRound(r.height() * size.height()));
-        if (look && box.isMain && look->barColor.alpha() > 0 && !box.text.trimmed().isEmpty())
+        if (look && box.isMain && box.isText() && look->barColor.alpha() > 0 && !box.text.trimmed().isEmpty())
             p.fillRect(px, look->barColor);
         p.drawImage(px.topLeft(), renderBox(box, effectiveStyle(box, look), px.size(), scale));
     }

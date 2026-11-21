@@ -5,6 +5,9 @@
 #include "render/TextRenderer.h"
 #include "show/ShowController.h"
 #include "show/ShowTimer.h"
+#include "bible/BibleLibrary.h"
+#include "bible/BiblePanel.h"
+#include "ui/ArrangementDialog.h"
 #include "ui/MediaBin.h"
 #include "ui/ScreenSetupDialog.h"
 #include "ui/SlideEditor.h"
@@ -13,6 +16,7 @@
 #include "ui/Theme.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -29,6 +33,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -86,6 +91,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     });
 
     m_library->load();
+    Presentation scriptureTemplate;
+    applyDefaultLook(scriptureTemplate);
+    m_biblePanel->setTemplate(scriptureTemplate);
     m_media->setFolders(m_settings.mediaFolders);
     m_engine->configure(m_settings.screens);
     buildPreviews();
@@ -125,20 +133,78 @@ void MainWindow::buildUi()
     auto *left = new QSplitter(Qt::Vertical);
     left->setHandleWidth(4);
 
-    auto *songsL = new QVBoxLayout;
     m_search = new QLineEdit;
-    m_search->setPlaceholderText(tr("Search title, lyrics, author or CCLI #"));
+    m_search->setPlaceholderText(tr("Search title, words, author or CCLI #"));
     m_search->setClearButtonEnabled(true);
-    songsL->addWidget(m_search);
-    m_libList = new QListWidget;
-    m_libList->setDragEnabled(true);
+
+    // Songs and slide decks live in separate tabs but behave the same way.
+    auto makeList = [this] {
+        auto *list = new QListWidget;
+        list->setDragEnabled(true);
+        list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        list->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(list, &QListWidget::customContextMenuRequested, this, [this, list](const QPoint &pos) {
+            if (!list->itemAt(pos)) return;
+            QMenu menu;
+            QMenu *looks = menu.addMenu(tr("Apply look"));
+            for (const Look &l : m_library->looks())
+                looks->addAction(l.name, this, [this, l] { applyLookToSelection(l); });
+            if (m_library->looks().isEmpty()) looks->addAction(tr("(save one from the editor's Presentation tab)"))->setEnabled(false);
+            menu.addAction(tr("Add to playlist"), this, [this, list] {
+                for (QListWidgetItem *it : list->selectedItems()) addToCurrentPlaylist(it->data(Qt::UserRole).toString());
+            });
+            menu.addSeparator();
+            menu.addAction(tr("Delete"), this, [this] { deletePresentation(); });
+            menu.exec(list->viewport()->mapToGlobal(pos));
+        });
+        connect(list, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+            showPresentation(item->data(Qt::UserRole).toString());
+        });
+        connect(list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
+            addToCurrentPlaylist(item->data(Qt::UserRole).toString());
+        });
+        return list;
+    };
+    m_libList = makeList();
+    m_deckList = makeList();
+
+    auto *decksL = new QVBoxLayout;
+    decksL->addWidget(m_deckList, 1);
+    auto *newDeck = new QPushButton(tr("+ New presentation"));
+    newDeck->setToolTip(tr("A slide deck: sermon points, announcements, photos and videos"));
+    connect(newDeck, &QPushButton::clicked, this, [this] { newDeckPresentation(); });
+    decksL->addWidget(newDeck);
+    auto *decksPanel = panel(decksL);
+    decksL->setContentsMargins(0, 8, 0, 0);
+    auto *songsL = new QVBoxLayout;
     songsL->addWidget(m_libList, 1);
     auto *songsPanel = panel(songsL);
     songsL->setContentsMargins(0, 8, 0, 0);
 
     m_leftTabs = new QTabWidget;
     m_leftTabs->addTab(songsPanel, tr("Songs"));
+    m_leftTabs->addTab(decksPanel, tr("Presentations"));
+    m_bibles = new BibleLibrary(this);
+    m_biblePanel = new BiblePanel(m_bibles);
+    m_leftTabs->addTab(m_biblePanel, tr("Bible"));
+    connect(m_biblePanel, &BiblePanel::presentationReady, this, [this](const Presentation &p) {
+        showUnsaved(p);
+    });
+    connect(m_biblePanel, &BiblePanel::addToPlaylist, this, [this](const Presentation &p) {
+        Presentation saved = p;
+        saved.id = newId();
+        m_library->save(saved);
+        if (!currentPlaylist()) {
+            QMessageBox::information(this, tr("Playlist"), tr("Saved to Presentations. Create a playlist to add it to one."));
+            return;
+        }
+        addToCurrentPlaylist(saved.id);
+        statusBar()->showMessage(tr("Added %1 to the playlist").arg(saved.title), 5000);
+    });
+    // The search box doesn't apply to the Bible tab, which has its own reference field.
+    connect(m_leftTabs, &QTabWidget::currentChanged, this, [this](int i) { m_search->setVisible(i != 2); });
     auto *libL = new QVBoxLayout;
+    libL->addWidget(m_search);
     libL->addWidget(m_leftTabs, 1);
     left->addWidget(panel(libL));
 
@@ -182,7 +248,25 @@ void MainWindow::buildUi()
     tf.setBold(true);
     m_presTitle->setFont(tf);
     head->addWidget(m_presTitle, 1);
-    auto *editBtn = new QPushButton(tr("Edit song"));
+    m_arrangementBox = new QComboBox;
+    m_arrangementBox->setToolTip(tr("Song order: play the groups in a different order without duplicating slides"));
+    m_arrangementBox->setMinimumWidth(200);
+    m_arrangementBox->setEnabled(false);
+    head->addWidget(m_arrangementBox);
+    auto *arrangeBtn = new QToolButton;
+    arrangeBtn->setText(tr("Edit order"));
+    head->addWidget(arrangeBtn);
+    connect(arrangeBtn, &QToolButton::clicked, this, [this] { editArrangement(m_current.activeArrangement); });
+    connect(m_arrangementBox, &QComboBox::activated, this, [this](int i) {
+        if (!m_hasCurrent) return;
+        if (i == m_arrangementBox->count() - 1) {
+            editArrangement(-1);
+            return;
+        }
+        m_current.activeArrangement = i - 1;
+        saveCurrent();
+    });
+    auto *editBtn = new QPushButton(tr("Edit"));
     editBtn->setToolTip(tr("Open the slide editor (Ctrl+E)"));
     head->addWidget(editBtn);
     cL->addLayout(head);
@@ -249,10 +333,6 @@ void MainWindow::buildUi()
 
     // Wiring
     connect(m_search, &QLineEdit::textChanged, this, &MainWindow::refreshLibrary);
-    connect(m_libList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
-        showPresentation(item->data(Qt::UserRole).toString());
-    });
-    connect(m_libList, &QListWidget::itemDoubleClicked, this, [plAdd] { plAdd->click(); });
     connect(m_playlist, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
         const QString id = item->data(Qt::UserRole).toString();
         if (!id.isEmpty()) showPresentation(id, m_playlist->row(item));
@@ -275,7 +355,7 @@ void MainWindow::buildUi()
     });
     connect(plAdd, &QPushButton::clicked, this, [this] {
         Playlist *p = currentPlaylist();
-        QListWidgetItem *sel = m_libList->currentItem();
+        QListWidgetItem *sel = activeLibraryList()->currentItem();
         if (!p) {
             QMessageBox::information(this, tr("Playlist"), tr("Create a playlist first."));
             return;
@@ -319,7 +399,8 @@ void MainWindow::buildUi()
     auto *clearSlideBg = new QAction(tr("Remove background from selected slides"), m_grid);
     connect(clearSlideBg, &QAction::triggered, this, [this] {
         if (!m_hasCurrent) return;
-        for (QListWidgetItem *it : m_grid->selectedItems()) m_current.slides[m_grid->row(it)].background = Background();
+        for (QListWidgetItem *it : m_grid->selectedItems())
+            m_current.slides[m_viewMap.value(m_grid->row(it))].background = Background();
         saveCurrent();
     });
     m_grid->addActions({editSlide, clearSlideBg});
@@ -351,6 +432,7 @@ void MainWindow::buildActions()
     QAction *ss = add(file, tr("SongSelect"), [this] { openSongSelect(); }, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
     ss->setToolTip(tr("Find songs on CCLI SongSelect; downloads go straight into your library"));
     add(file, tr("New song…"), [this] { newPresentation(); }, QKeySequence::New);
+    add(file, tr("New presentation…"), [this] { newDeckPresentation(); }, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N));
     add(file, tr("Paste lyrics…"), [this] { newFromLyrics(); });
     add(file, tr("Import files…"), [this] { importSongs(); }, QKeySequence(Qt::CTRL | Qt::Key_I));
     file->addSeparator();
@@ -375,6 +457,31 @@ void MainWindow::buildActions()
     outputs->setToolTip(tr("Turn all physical outputs (monitors, NDI, DeckLink) on or off (Ctrl+O)"));
     connect(outputs, &QAction::toggled, this, [outputs](bool on) {
         outputs->setText(on ? tr("● Outputs live") : tr("○ Outputs off"));
+    });
+
+    QMenu *looksMenu = menuBar()->addMenu(tr("&Looks"));
+    connect(looksMenu, &QMenu::aboutToShow, this, [this, looksMenu] {
+        looksMenu->clear();
+        QMenu *def = looksMenu->addMenu(tr("Default look for new songs"));
+        auto *group = new QActionGroup(def);
+        auto addChoice = [&](const QString &name, const QString &id) {
+            QAction *a = def->addAction(name, this, [this, id] {
+                m_settings.defaultLookId = id;
+                m_settings.save();
+            });
+            a->setCheckable(true);
+            a->setChecked(m_settings.defaultLookId == id);
+            group->addAction(a);
+        };
+        addChoice(tr("None (built-in)"), QString());
+        for (const Look &l : m_library->looks()) addChoice(l.name, l.id);
+        QMenu *del = looksMenu->addMenu(tr("Delete look"));
+        for (const Look &l : m_library->looks())
+            del->addAction(l.name, this, [this, l] { m_library->removeLook(l.id); });
+        del->setEnabled(!m_library->looks().isEmpty());
+        looksMenu->addSeparator();
+        looksMenu->addAction(tr("Tip: save a look from the slide editor's Presentation tab; "
+                                "right-click songs in the library to apply one."))->setEnabled(false);
     });
 
     QMenu *help = menuBar()->addMenu(tr("&Help"));
@@ -447,27 +554,91 @@ void MainWindow::buildPreviews()
 
 // ---- Library / playlist ---------------------------------------------------
 
+QListWidget *MainWindow::activeLibraryList() const
+{
+    return m_leftTabs->currentIndex() == 1 ? m_deckList : m_libList;
+}
+
+static bool isSong(const Presentation &p)
+{
+    return p.category == QLatin1String("Song");
+}
+
 void MainWindow::refreshLibrary()
 {
     const QString q = m_search->text().trimmed();
-    const QString current = m_libList->currentItem() ? m_libList->currentItem()->data(Qt::UserRole).toString() : QString();
-    m_libList->clear();
-    for (const Presentation &p : m_library->presentations()) {
-        if (!q.isEmpty()) {
-            bool match = p.title.contains(q, Qt::CaseInsensitive) || p.ccliNumber == q
-                         || p.author.contains(q, Qt::CaseInsensitive);
-            for (int i = 0; !match && i < p.slides.size(); ++i)
-                match = p.slides[i].mainText().contains(q, Qt::CaseInsensitive);
-            if (!match) continue;
+    for (QListWidget *list : {m_libList, m_deckList}) {
+        const QString current = list->currentItem() ? list->currentItem()->data(Qt::UserRole).toString() : QString();
+        list->clear();
+        for (const Presentation &p : m_library->presentations()) {
+            if (isSong(p) != (list == m_libList)) continue;
+            if (!q.isEmpty()) {
+                bool match = p.title.contains(q, Qt::CaseInsensitive) || p.ccliNumber == q
+                             || p.author.contains(q, Qt::CaseInsensitive);
+                for (int i = 0; !match && i < p.slides.size(); ++i)
+                    match = p.slides[i].mainText().contains(q, Qt::CaseInsensitive);
+                if (!match) continue;
+            }
+            QString title = p.title;
+            if (list == m_deckList && p.category != QLatin1String("Presentation"))
+                title += QStringLiteral("  ·  %1").arg(p.category == QLatin1String("Media") ? tr("media") : p.category.toLower());
+            auto *item = new QListWidgetItem(title);
+            item->setData(Qt::UserRole, p.id);
+            item->setToolTip(QStringList{p.author, p.copyright, p.ccliNumber.isEmpty() ? QString() : "CCLI #" + p.ccliNumber}
+                                 .filter(QRegularExpression(".")).join('\n'));
+            list->addItem(item);
+            if (p.id == current) list->setCurrentItem(item);
         }
-        auto *item = new QListWidgetItem(p.title);
-        item->setData(Qt::UserRole, p.id);
-        item->setToolTip(QStringList{p.author, p.copyright, p.ccliNumber.isEmpty() ? QString() : "CCLI #" + p.ccliNumber}
-                             .filter(QRegularExpression(".")).join('\n'));
-        m_libList->addItem(item);
-        if (p.id == current) m_libList->setCurrentItem(item);
     }
     refreshPlaylistItems();   // titles may have changed
+}
+
+void MainWindow::showUnsaved(const Presentation &p)
+{
+    // Scripture is shown straight from the Bible tab; it only reaches the
+    // library if the operator edits it or adds it to a playlist.
+    m_current = p;
+    m_hasCurrent = true;
+    m_playlistRow = -1;
+    m_presTitle->setText(p.title + QStringLiteral("  <span style='color:gray; font-weight:normal'>%1</span>").arg(tr("not saved")));
+    refreshArrangements();
+    refreshGrid();
+}
+
+void MainWindow::newDeckPresentation()
+{
+    const QString title = QInputDialog::getText(this, tr("New presentation"), tr("Title:"), QLineEdit::Normal,
+                                                tr("Sermon"));
+    if (title.trimmed().isEmpty()) return;
+    Presentation p;
+    p.id = newId();
+    p.title = title.trimmed();
+    p.category = QStringLiteral("Presentation");
+    p.defaultTransition.type = TransitionType::Fade;
+    p.defaultBackground = Background::solid(QColor(18, 18, 24));
+    applyDefaultLook(p);
+    // A title slide to start from: big heading plus a smaller line.
+    Slide s = p.makeSlide(tr("Slide 1"), p.title);
+    s.labelColor = Theme::accent;
+    TextBox &heading = s.boxes.first();
+    heading.rect = QRectF(0.08, 0.30, 0.84, 0.25);
+    heading.style.fontSize = 110;
+    heading.style.shadow = false;
+    TextBox sub;
+    sub.id = newId();
+    sub.text = QLocale().toString(QDate::currentDate(), QLocale::LongFormat);
+    sub.style = heading.style;
+    sub.style.fontSize = 48;
+    sub.style.bold = false;
+    sub.style.color = QColor(200, 200, 210);
+    sub.rect = QRectF(0.08, 0.56, 0.84, 0.10);
+    sub.isMain = false;
+    s.boxes.append(sub);
+    p.slides.append(s);
+    m_library->save(p);
+    m_leftTabs->setCurrentIndex(1);
+    showPresentation(p.id);
+    editPresentation(0);
 }
 
 void MainWindow::refreshPlaylists()
@@ -528,7 +699,62 @@ void MainWindow::showPresentation(const QString &id, int playlistRow)
     QString title = m_current.title;
     if (!m_current.author.isEmpty()) title += QStringLiteral("  <span style='color:gray; font-weight:normal'>%1</span>").arg(m_current.author.toHtmlEscaped());
     m_presTitle->setText(title);
+    refreshArrangements();
     refreshGrid();
+}
+
+void MainWindow::refreshArrangements()
+{
+    const QSignalBlocker block(m_arrangementBox);
+    m_arrangementBox->clear();
+    m_arrangementBox->addItem(tr("As written"));
+    for (const Arrangement &a : std::as_const(m_current.arrangements))
+        m_arrangementBox->addItem(QStringLiteral("%1 — %2").arg(a.name, a.groups.join(", ")));
+    m_arrangementBox->addItem(tr("New arrangement…"));
+    m_arrangementBox->setCurrentIndex(m_current.activeArrangement + 1);
+    m_arrangementBox->setEnabled(m_hasCurrent);
+}
+
+void MainWindow::editArrangement(int index)
+{
+    if (!m_hasCurrent) return;
+    const Arrangement start = index >= 0 && index < m_current.arrangements.size() ? m_current.arrangements[index]
+                                                                                  : Arrangement();
+    ArrangementDialog dlg(m_current, start, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        if (index >= 0 && index < m_current.arrangements.size()) {
+            m_current.arrangements[index] = dlg.arrangement();
+        } else {
+            m_current.arrangements.append(dlg.arrangement());
+            index = int(m_current.arrangements.size()) - 1;
+        }
+        m_current.activeArrangement = index;
+        saveCurrent();
+    }
+    refreshArrangements();
+}
+
+void MainWindow::applyLookToSelection(const Look &look)
+{
+    const auto items = activeLibraryList()->selectedItems();
+    for (QListWidgetItem *item : items) {
+        const Presentation *found = m_library->find(item->data(Qt::UserRole).toString());
+        if (!found) continue;
+        Presentation p = *found;
+        p.applyLook(look);
+        m_library->save(p);
+        if (m_hasCurrent && p.id == m_current.id) {
+            m_current = p;
+            refreshGrid();
+            m_show->presentationUpdated(m_view);
+        }
+    }
+    statusBar()->showMessage(tr("Applied \"%1\" to %n song(s)", nullptr, int(items.size())).arg(look.name), 5000);
+}
+
+void MainWindow::applyDefaultLook(Presentation &p) const
+{
+    if (const Look *l = m_library->look(m_settings.defaultLookId)) p.applyLook(*l);
 }
 
 void MainWindow::refreshGrid()
@@ -537,11 +763,12 @@ void MainWindow::refreshGrid()
     m_grid->clear();
     m_thumbs.clear();
     if (!m_hasCurrent) return;
-    for (int i = 0; i < m_current.slides.size(); ++i) {
-        const Background bg = m_current.effectiveBackground(i);
+    m_view = m_current.arranged(&m_viewMap);
+    for (int i = 0; i < m_view.slides.size(); ++i) {
+        const Background bg = m_view.effectiveBackground(i);
         const QImage poster = bg.type == Background::Type::Image || bg.type == Background::Type::Video
                                   ? m_media->poster(bg.path) : QImage();
-        m_thumbs << TextRenderer::renderSlide(m_current.slides[i], bg, kThumb, nullptr, poster);
+        m_thumbs << TextRenderer::renderSlide(m_view.slides[i], bg, kThumb, nullptr, poster);
         auto *item = new QListWidgetItem;
         item->setSizeHint(kThumb + QSize(8, 32));
         m_grid->addItem(item);
@@ -555,7 +782,7 @@ void MainWindow::updateGridIcons()
     if (!m_hasCurrent) return;
     const bool isLive = m_show->livePresentationId() == m_current.id;
     for (int i = 0; i < m_thumbs.size() && i < m_grid->count(); ++i) {
-        const Slide &s = m_current.slides[i];
+        const Slide &s = m_view.slides[i];
         QPixmap pm(kThumb + QSize(0, 24));
         pm.fill(QColor(30, 30, 30));
         QPainter p(&pm);
@@ -611,7 +838,7 @@ void MainWindow::refreshPreviews()
 void MainWindow::takeSlide(int index)
 {
     if (!m_hasCurrent) return;
-    m_show->take(m_current, index);
+    m_show->take(m_view, index);
 }
 
 void MainWindow::goNext()
@@ -619,10 +846,10 @@ void MainWindow::goNext()
     const bool liveIsShown = m_hasCurrent && m_show->livePresentationId() == m_current.id;
     if (!liveIsShown) {
         // Nothing of this song is live yet: start it.
-        if (m_hasCurrent && !m_current.slides.isEmpty()) takeSlide(0);
+        if (m_hasCurrent && !m_view.slides.isEmpty()) takeSlide(0);
         return;
     }
-    if (m_show->liveIndex() + 1 < m_current.slides.size() || m_current.loop) {
+    if (m_show->liveIndex() + 1 < m_view.slides.size() || m_current.loop) {
         m_show->next();
         return;
     }
@@ -633,7 +860,7 @@ void MainWindow::goNext()
         if (id.isEmpty()) continue;
         m_playlist->setCurrentRow(r);
         showPresentation(id, r);
-        if (!m_current.slides.isEmpty()) takeSlide(0);
+        if (!m_view.slides.isEmpty()) takeSlide(0);
         return;
     }
 }
@@ -649,8 +876,8 @@ void MainWindow::saveCurrent()
 {
     if (!m_hasCurrent) return;
     m_library->save(m_current);
-    m_show->presentationUpdated(m_current);
     refreshGrid();
+    m_show->presentationUpdated(m_view);
 }
 
 void MainWindow::newPresentation()
@@ -660,6 +887,7 @@ void MainWindow::newPresentation()
     Presentation p;
     p.id = newId();
     p.title = title.trimmed();
+    applyDefaultLook(p);
     p.slides.append(p.makeSlide(tr("Verse 1"), QString()));
     m_library->save(p);
     showPresentation(p.id);
@@ -686,6 +914,7 @@ void MainWindow::newFromLyrics()
     const SongImporter::Song song = SongImporter::parseSongSelectText(edit->toPlainText());
     if (song.sections.isEmpty()) return;
     Presentation templ;
+    applyDefaultLook(templ);
     const Presentation p = SongImporter::toPresentation(song, m_settings.linesPerSlide, templ);
     m_library->save(p);
     showPresentation(p.id);
@@ -716,6 +945,7 @@ void MainWindow::importFiles(const QStringList &files, bool quiet)
     QString lastId;
     int added = 0;
     Presentation templ;
+    applyDefaultLook(templ);
     for (const QString &f : files) {
         SongImporter::Song song;
         QString err;
@@ -761,7 +991,8 @@ void MainWindow::openSongSelect()
 void MainWindow::editPresentation(int slideIndex)
 {
     if (!m_hasCurrent) return;
-    SlideEditor editor(m_current, slideIndex, m_media, this);
+    // The editor works on the slides as written; map the grid row back.
+    SlideEditor editor(m_current, m_viewMap.value(slideIndex, slideIndex), m_media, m_library, this);
     if (editor.exec() != QDialog::Accepted) return;
     m_current = editor.presentation();
     m_presTitle->setText(m_current.title);
@@ -796,7 +1027,8 @@ void MainWindow::applyMediaToSlides(const QString &path)
         statusBar()->showMessage(tr("Select one or more slides first"), 4000);
         return;
     }
-    for (QListWidgetItem *it : selected) m_current.slides[m_grid->row(it)].background = Background::media(path);
+    for (QListWidgetItem *it : selected)
+        m_current.slides[m_viewMap.value(m_grid->row(it))].background = Background::media(path);
     saveCurrent();
 }
 

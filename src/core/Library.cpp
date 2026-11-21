@@ -47,6 +47,7 @@ Library::Library(const QString &root, QObject *parent)
     QDir().mkpath(m_root + "/Presentations");
     QDir().mkpath(m_root + "/Playlists");
     QDir().mkpath(m_root + "/Media");
+    QDir().mkpath(m_root + "/Looks");
 }
 
 QString Library::presPath(const QString &id) const { return m_root + "/Presentations/" + id + ".rpres"; }
@@ -66,8 +67,38 @@ void Library::load()
         m_playlists.append(Playlist::fromJson(readJson(ld.filePath(f))));
     std::sort(m_playlists.begin(), m_playlists.end(),
               [](const Playlist &a, const Playlist &b) { return a.name < b.name; });
+    m_looks.clear();
+    const QDir lk(m_root + "/Looks");
+    for (const QString &f : lk.entryList({"*.rplook"}, QDir::Files))
+        m_looks.append(Look::fromJson(readJson(lk.filePath(f))));
+    std::sort(m_looks.begin(), m_looks.end(), [](const Look &a, const Look &b) { return a.name < b.name; });
     emit presentationsChanged();
     emit playlistsChanged();
+    emit looksChanged();
+}
+
+const Look *Library::look(const QString &id) const
+{
+    for (const Look &l : m_looks)
+        if (l.id == id) return &l;
+    return nullptr;
+}
+
+void Library::saveLook(const Look &l)
+{
+    auto it = std::find_if(m_looks.begin(), m_looks.end(), [&](const Look &x) { return x.id == l.id; });
+    if (it == m_looks.end()) m_looks.append(l);
+    else *it = l;
+    writeJson(m_root + "/Looks/" + l.id + ".rplook", l.toJson());
+    emit looksChanged();
+}
+
+void Library::removeLook(const QString &id)
+{
+    m_looks.erase(std::remove_if(m_looks.begin(), m_looks.end(), [&](const Look &x) { return x.id == id; }),
+                  m_looks.end());
+    QFile::remove(m_root + "/Looks/" + id + ".rplook");
+    emit looksChanged();
 }
 
 QList<Presentation> Library::presentations() const

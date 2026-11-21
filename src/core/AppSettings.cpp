@@ -23,6 +23,7 @@ AppSettings AppSettings::load()
         for (const QJsonValue &v : o["mediaFolders"].toArray()) s.mediaFolders.append(v.toString());
         s.linesPerSlide = o["linesPerSlide"].toInt(2);
         s.lastImportDir = o["lastImportDir"].toString();
+        s.defaultLookId = o["defaultLookId"].toString();
     }
     if (s.screens.isEmpty())
         s.screens = {ScreenConfig::defaults(ScreenRole::Audience),
@@ -36,7 +37,8 @@ void AppSettings::save() const
     QJsonArray sc;
     for (const ScreenConfig &c : screens) sc.append(c.toJson());
     const QJsonObject o{{"screens", sc}, {"mediaFolders", QJsonArray::fromStringList(mediaFolders)},
-                        {"linesPerSlide", linesPerSlide}, {"lastImportDir", lastImportDir}};
+                        {"linesPerSlide", linesPerSlide}, {"lastImportDir", lastImportDir},
+                        {"defaultLookId", defaultLookId}};
     QSaveFile f(path());
     if (f.open(QIODevice::WriteOnly)) {
         f.write(QJsonDocument(o).toJson(QJsonDocument::Indented));

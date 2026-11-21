@@ -1,5 +1,6 @@
 #include "ui/SlideEditor.h"
 
+#include "core/Library.h"
 #include "core/RichText.h"
 #include "render/TextRenderer.h"
 #include "ui/MediaBin.h"
@@ -15,6 +16,7 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -33,8 +35,8 @@
 static constexpr double kEditScale = 0.4;
 static const QSize kPreview(960, 540);
 
-SlideEditor::SlideEditor(const Presentation &p, int startIndex, MediaBin *media, QWidget *parent)
-    : QDialog(parent), m_pres(p), m_media(media)
+SlideEditor::SlideEditor(const Presentation &p, int startIndex, MediaBin *media, Library *library, QWidget *parent)
+    : QDialog(parent), m_pres(p), m_media(media), m_library(library)
 {
     setWindowTitle(tr("Edit — %1").arg(p.title));
     resize(1400, 860);
@@ -82,6 +84,7 @@ void SlideEditor::buildUi()
     auto *leftL = new QVBoxLayout(left);
     leftL->setContentsMargins(0, 0, 0, 0);
     m_slides = new QListWidget;
+    m_slides->setIconSize(QSize(128, 72));
     leftL->addWidget(m_slides, 1);
     auto *slideBtns = new QHBoxLayout;
     auto button = [&](const QString &text, const QString &tip) {
@@ -92,6 +95,7 @@ void SlideEditor::buildUi()
         return b;
     };
     auto *addSlide = button("+", tr("Add slide after this one"));
+    auto *addMedia = button(tr("+ Media"), tr("Add photos or videos as full-screen slides"));
     auto *dupSlide = button("⧉", tr("Duplicate slide"));
     auto *delSlide = button("−", tr("Delete slide"));
     auto *upSlide = button("↑", tr("Move up"));
@@ -214,23 +218,66 @@ void SlideEditor::buildUi()
     auto *boxTab = new QWidget;
     auto *bxf = new QFormLayout(boxTab);
     m_boxPicker = new QComboBox;
-    auto *addBox = new QToolButton;
-    addBox->setText("+");
-    addBox->setToolTip(tr("Add a text box to this slide"));
-    auto *delBox = new QToolButton;
-    delBox->setText("−");
-    delBox->setToolTip(tr("Remove this text box"));
+    auto elementButton = [](const QString &text, const QString &tip) {
+        auto *b = new QToolButton;
+        b->setText(text);
+        b->setToolTip(tip);
+        return b;
+    };
+    auto *addBox = elementButton(tr("+ Text"), tr("Add a text box to this slide"));
+    auto *addImage = elementButton(tr("+ Image"), tr("Add a picture or logo to this slide"));
+    auto *addShape = elementButton(tr("+ Shape"), tr("Add a colour panel, band or card"));
+    auto *forward = elementButton(tr("Forward"), tr("Bring the selected element in front of others"));
+    auto *backward = elementButton(tr("Back"), tr("Send the selected element behind others"));
+    auto *delBox = elementButton(tr("Delete"), tr("Remove the selected element"));
+    auto *addRow = new QHBoxLayout;
+    for (QToolButton *b : {addBox, addImage, addShape}) addRow->addWidget(b);
+    addRow->addStretch();
+    bxf->addRow(addRow);
     auto *boxRow = new QHBoxLayout;
     boxRow->addWidget(m_boxPicker, 1);
-    boxRow->addWidget(addBox);
-    boxRow->addWidget(delBox);
-    bxf->addRow(tr("Text box"), boxRow);
+    for (QToolButton *b : {forward, backward, delBox}) boxRow->addWidget(b);
+    bxf->addRow(tr("Element"), boxRow);
     m_boxMain = new QCheckBox(tr("Main lyric box (screen overrides apply)"));
     bxf->addRow(m_boxMain);
     m_rect = new RectEditor;
     bxf->addRow(tr("Position"), m_rect);
     m_style = new StyleEditor;
     bxf->addRow(m_style);
+
+    m_imageGroup = new QGroupBox(tr("Image"));
+    auto *igf = new QFormLayout(m_imageGroup);
+    m_imagePath = new QLabel;
+    m_imagePath->setWordWrap(true);
+    auto *chooseImage = new QPushButton(tr("Choose…"));
+    auto *imgRow = new QHBoxLayout;
+    imgRow->addWidget(m_imagePath, 1);
+    imgRow->addWidget(chooseImage);
+    igf->addRow(tr("File"), imgRow);
+    m_imageFit = new QComboBox;
+    m_imageFit->addItems({tr("Fill (crop)"), tr("Fit"), tr("Stretch")});
+    igf->addRow(tr("Scaling"), m_imageFit);
+    bxf->addRow(m_imageGroup);
+
+    m_shapeGroup = new QGroupBox(tr("Shape"));
+    auto *sgf = new QFormLayout(m_shapeGroup);
+    m_fill = new ColorButton(this, true);
+    sgf->addRow(tr("Colour"), m_fill);
+    bxf->addRow(m_shapeGroup);
+
+    m_radius = new QSpinBox;
+    m_radius->setRange(0, 540);
+    m_radius->setSuffix(" px");
+    m_opacity = new QSpinBox;
+    m_opacity->setRange(5, 100);
+    m_opacity->setSuffix(" %");
+    auto *lookRow = new QHBoxLayout;
+    lookRow->addWidget(new QLabel(tr("Corners")));
+    lookRow->addWidget(m_radius);
+    lookRow->addWidget(new QLabel(tr("Opacity")));
+    lookRow->addWidget(m_opacity);
+    lookRow->addStretch();
+    bxf->addRow(lookRow);
     auto *buildBox = new QGroupBox(tr("Build animation"));
     auto *buf = new QHBoxLayout(buildBox);
     m_build = new QComboBox;
@@ -249,7 +296,7 @@ void SlideEditor::buildUi()
     buf->addWidget(m_buildDelay);
     buf->addWidget(m_buildMs);
     bxf->addRow(buildBox);
-    tabs->addTab(boxTab, tr("Text box"));
+    tabs->addTab(boxTab, tr("Elements"));
 
     // Presentation tab
     auto *presTab = new QWidget;
@@ -283,6 +330,49 @@ void SlideEditor::buildUi()
     auto *applyStyle = new QPushButton(tr("Apply this box's style to every slide"));
     applyStyle->setToolTip(tr("Copies the current main box style and position to all slides and makes it the default for new slides"));
     pf->addRow(applyStyle);
+
+    auto *lookBox = new QGroupBox(tr("Looks"));
+    auto *lf = new QHBoxLayout(lookBox);
+    auto *looks = new QComboBox;
+    auto refillLooks = [this, looks] {
+        looks->clear();
+        for (const Look &l : m_library->looks()) looks->addItem(l.name, l.id);
+    };
+    refillLooks();
+    auto *applyLook = new QPushButton(tr("Apply"));
+    auto *saveLook = new QPushButton(tr("Save current as look…"));
+    saveLook->setToolTip(tr("Saves the selected box's style and position, the default background and transition"));
+    lf->addWidget(looks, 1);
+    lf->addWidget(applyLook);
+    lf->addWidget(saveLook);
+    pf->addRow(lookBox);
+    connect(applyLook, &QPushButton::clicked, this, [this, looks] {
+        if (const Look *l = m_library->look(looks->currentData().toString())) {
+            m_pres.applyLook(*l);
+            m_defTransition->setCurrentIndex(int(m_pres.defaultTransition.type));
+            m_defTransitionMs->setValue(m_pres.defaultTransition.durationMs);
+            m_defBg->setText(m_pres.defaultBackground.describe());
+            loadSlide();
+        }
+    });
+    connect(saveLook, &QPushButton::clicked, this, [this, refillLooks, looks] {
+        const QString name = QInputDialog::getText(this, tr("Save look"), tr("Name:"));
+        if (name.trimmed().isEmpty()) return;
+        Look l;
+        l.id = newId();
+        l.name = name.trimmed();
+        if (const TextBox *b = box()) {
+            l.style = b->style;
+            l.rect = b->rect;
+        } else {
+            l.style = m_pres.defaultStyle;
+        }
+        l.background = m_pres.defaultBackground;
+        l.transition = m_pres.defaultTransition;
+        m_library->saveLook(l);
+        refillLooks();
+        looks->setCurrentIndex(looks->findData(l.id));
+    });
     tabs->addTab(presTab, tr("Presentation"));
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -307,10 +397,20 @@ void SlideEditor::buildUi()
         m_box = 0;
         loadSlide();
     });
+    connect(addMedia, &QToolButton::clicked, this, [this] {
+        QStringList paths = m_media->selectedPaths();
+        if (paths.isEmpty())
+            paths = QFileDialog::getOpenFileNames(this, tr("Add media slides"), QString(),
+                tr("Photos and videos (*.jpg *.jpeg *.png *.webp *.bmp *.mp4 *.mov *.m4v *.mkv *.avi *.webm *.wmv)"));
+        addMediaSlides(paths);
+    });
     connect(addSlide, &QToolButton::clicked, this, [this] {
-        Slide s = m_pres.makeSlide(slide()->label, QString());
-        s.boxes.first().style = box() ? box()->style : m_pres.defaultStyle;
-        if (box()) s.boxes.first().rect = box()->rect;
+        const bool deck = m_pres.category == QLatin1String("Presentation");
+        Slide s = m_pres.makeSlide(deck ? tr("Slide %1").arg(m_pres.slides.size() + 1) : slide()->label, QString());
+        if (const TextBox *b = box(); b && b->isText()) {
+            s.boxes.first().style = b->style;
+            s.boxes.first().rect = b->rect;
+        }
         m_pres.slides.insert(++m_slide, s);
         refreshSlideList();
         loadSlide();
@@ -476,12 +576,52 @@ void SlideEditor::buildUi()
         m_box = int(slide()->boxes.size()) - 1;
         loadSlide();
     });
-    connect(delBox, &QToolButton::clicked, this, [this] {
-        if (slide()->boxes.size() <= 1) return;
-        slide()->boxes.removeAt(m_box);
+    connect(addImage, &QToolButton::clicked, this, [this] {
+        const QString path = QFileDialog::getOpenFileName(this, tr("Add image"), QString(),
+                                                          tr("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.svg)"));
+        if (path.isEmpty()) return;
+        slide()->boxes.append(TextBox::image(path));
+        m_box = int(slide()->boxes.size()) - 1;
+        loadSlide();
+    });
+    connect(addShape, &QToolButton::clicked, this, [this] {
+        // New shapes go behind the text so a panel never hides the words.
+        TextBox shape = TextBox::shape(QColor(0, 0, 0, 150));
+        slide()->boxes.prepend(shape);
         m_box = 0;
         loadSlide();
     });
+    connect(forward, &QToolButton::clicked, this, [this] {
+        if (m_box + 1 >= slide()->boxes.size()) return;
+        slide()->boxes.swapItemsAt(m_box, m_box + 1);
+        ++m_box;
+        loadSlide();
+    });
+    connect(backward, &QToolButton::clicked, this, [this] {
+        if (m_box <= 0) return;
+        slide()->boxes.swapItemsAt(m_box, m_box - 1);
+        --m_box;
+        loadSlide();
+    });
+    connect(delBox, &QToolButton::clicked, this, [this] {
+        if (!box()) return;
+        slide()->boxes.removeAt(m_box);
+        m_box = qMax(0, m_box - 1);
+        loadSlide();
+    });
+    connect(chooseImage, &QPushButton::clicked, this, [this] {
+        TextBox *b = box();
+        if (!b || b->kind != TextBox::Kind::Image) return;
+        const QString path = QFileDialog::getOpenFileName(this, tr("Choose image"), QFileInfo(b->imagePath).absolutePath(),
+                                                          tr("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.svg)"));
+        if (path.isEmpty()) return;
+        b->imagePath = path;
+        loadBox();
+    });
+    connect(m_imageFit, &QComboBox::currentIndexChanged, this, &SlideEditor::storeBox);
+    connect(m_fill, &ColorButton::colorChanged, this, &SlideEditor::storeBox);
+    connect(m_radius, &QSpinBox::valueChanged, this, &SlideEditor::storeBox);
+    connect(m_opacity, &QSpinBox::valueChanged, this, &SlideEditor::storeBox);
     connect(m_boxMain, &QCheckBox::toggled, this, &SlideEditor::storeBox);
     connect(m_rect, &RectEditor::changed, this, &SlideEditor::storeBox);
     connect(m_style, &StyleEditor::changed, this, [this] {
@@ -529,14 +669,53 @@ void SlideEditor::refreshSlideList()
 {
     m_loading = true;
     m_slides->clear();
-    for (const Slide &s : std::as_const(m_pres.slides)) {
-        QPixmap swatch(12, 28);
-        swatch.fill(s.labelColor.isValid() ? s.labelColor : Slide::colorForLabel(s.label));
+    for (int i = 0; i < m_pres.slides.size(); ++i) {
+        const Slide &s = m_pres.slides[i];
         const QString first = s.mainText().section('\n', 0, 0);
-        m_slides->addItem(new QListWidgetItem(QIcon(swatch), QStringLiteral("%1\n%2").arg(s.label, first)));
+        m_slides->addItem(new QListWidgetItem(QStringLiteral("%1\n%2").arg(s.label, first)));
+        refreshSlideIcon(i);
     }
     m_slides->setCurrentRow(m_slide);
     m_loading = false;
+}
+
+void SlideEditor::addMediaSlides(const QStringList &paths)
+{
+    if (paths.isEmpty()) return;
+    int at = m_slide;
+    for (const QString &path : paths) {
+        Slide s;
+        s.id = newId();
+        s.label = QFileInfo(path).completeBaseName();
+        s.labelColor = QColor("#2a9d8f");
+        s.background = Background::media(path);
+        s.background.fit = FitMode::Fit;
+        // Videos on a media slide play once with sound; photos just sit there.
+        if (s.background.type == Background::Type::Video) {
+            s.background.audio = true;
+            s.background.loop = false;
+        }
+        m_pres.slides.insert(++at, s);
+    }
+    m_slide = at;
+    m_box = 0;
+    refreshSlideList();
+    loadSlide();
+}
+
+void SlideEditor::refreshSlideIcon(int index)
+{
+    QListWidgetItem *item = m_slides->item(index);
+    if (!item) return;
+    const Slide &s = m_pres.slides[index];
+    const Background bg = m_pres.effectiveBackground(index);
+    const QImage poster = bg.type == Background::Type::Image || bg.type == Background::Type::Video
+                              ? m_media->poster(bg.path) : QImage();
+    QImage thumb = TextRenderer::renderSlide(s, bg, QSize(128, 72), nullptr, poster);
+    QPainter p(&thumb);
+    p.fillRect(QRect(0, 0, 5, 72), s.labelColor.isValid() ? s.labelColor : Slide::colorForLabel(s.label));
+    p.end();
+    item->setIcon(QIcon(QPixmap::fromImage(thumb)));
 }
 
 void SlideEditor::loadSlide()
@@ -566,8 +745,16 @@ void SlideEditor::loadSlide()
     m_advance->setValue(s.advanceMs / 1000);
 
     m_boxPicker->clear();
-    for (int i = 0; i < s.boxes.size(); ++i)
-        m_boxPicker->addItem(s.boxes[i].isMain ? tr("Box %1 (main)").arg(i + 1) : tr("Box %1").arg(i + 1));
+    for (int i = 0; i < s.boxes.size(); ++i) {
+        const TextBox &b = s.boxes[i];
+        QString name;
+        switch (b.kind) {
+        case TextBox::Kind::Text: name = b.isMain ? tr("Text %1 (main)") : tr("Text %1"); break;
+        case TextBox::Kind::Image: name = tr("Image %1"); break;
+        case TextBox::Kind::Shape: name = tr("Shape %1"); break;
+        }
+        m_boxPicker->addItem(name.arg(i + 1));
+    }
     m_box = qBound(0, m_box, int(s.boxes.size()) - 1);
     m_boxPicker->setCurrentIndex(m_box);
     m_loading = false;
@@ -580,7 +767,19 @@ void SlideEditor::loadBox()
 {
     const TextBox *b = box();
     m_loading = true;
+    const bool isText = b && b->isText();
+    m_style->setVisible(isText);
+    m_boxMain->setVisible(isText);
+    m_text->setEnabled(isText);
+    m_imageGroup->setVisible(b && b->kind == TextBox::Kind::Image);
+    m_shapeGroup->setVisible(b && b->kind == TextBox::Kind::Shape);
+    m_radius->setEnabled(b && !isText);
     if (b) {
+        m_imagePath->setText(QFileInfo(b->imagePath).fileName());
+        m_imageFit->setCurrentIndex(int(b->imageFit));
+        m_fill->setColor(b->fill);
+        m_radius->setValue(qRound(b->cornerRadius));
+        m_opacity->setValue(qRound(b->opacity * 100));
         m_boxMain->setChecked(b->isMain);
         m_rect->setRect(b->rect);
         m_style->setStyle(b->style);
@@ -616,6 +815,7 @@ void SlideEditor::storeText()
     if (!b) return;
     b->runs = RichText::fromDocument(m_text->document(), b->style, kEditScale);
     b->text = RichText::plainText(b->runs);
+    refreshSlideIcon(m_slide);
     if (QListWidgetItem *item = m_slides->item(m_slide))
         item->setText(QStringLiteral("%1\n%2").arg(slide()->label, slide()->mainText().section('\n', 0, 0)));
     updatePreview();
@@ -634,9 +834,7 @@ void SlideEditor::storeSlide()
     m_transition->setEnabled(s->hasTransition);
     m_transitionMs->setEnabled(s->hasTransition);
     if (QListWidgetItem *item = m_slides->item(m_slide)) {
-        QPixmap swatch(12, 28);
-        swatch.fill(s->labelColor);
-        item->setIcon(QIcon(swatch));
+        refreshSlideIcon(m_slide);
         item->setText(QStringLiteral("%1\n%2").arg(s->label, s->mainText().section('\n', 0, 0)));
     }
     updatePreview();
@@ -653,7 +851,12 @@ void SlideEditor::storeBox()
     b->build = BuildAnimation(m_build->currentIndex());
     b->buildDelayMs = m_buildDelay->value();
     b->buildDurationMs = m_buildMs->value();
+    b->imageFit = FitMode(m_imageFit->currentIndex());
+    b->fill = m_fill->color();
+    b->cornerRadius = m_radius->value();
+    b->opacity = m_opacity->value() / 100.0;
     updatePreview();
+    refreshSlideIcon(m_slide);
 }
 
 void SlideEditor::chooseBackground(bool presentationDefault)

@@ -105,10 +105,10 @@ void ScreenRenderer::rebuildLayers()
         BoxLayer layer;
         layer.rect = QRect(qRound(r.x() * res.width()), qRound(r.y() * res.height()),
                            qRound(r.width() * res.width()), qRound(r.height() * res.height()));
-        if (layer.rect.isEmpty() || box.text.trimmed().isEmpty()) continue;
+        if (layer.rect.isEmpty() || (box.isText() && box.text.trimmed().isEmpty())) continue;
 
         layer.image = QImage(layer.rect.size(), QImage::Format_ARGB32_Premultiplied);
-        layer.image.fill(box.isMain ? m_cfg.look.barColor : QColor(Qt::transparent));
+        layer.image.fill(box.isMain && box.isText() ? m_cfg.look.barColor : QColor(Qt::transparent));
         QPainter p(&layer.image);
         p.drawImage(0, 0, TextRenderer::renderBox(box, TextRenderer::effectiveStyle(box, &m_cfg.look),
                                                   layer.rect.size(), scale));

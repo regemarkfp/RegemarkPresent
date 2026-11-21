@@ -5,9 +5,11 @@
 #include <QDialog>
 
 class ColorButton;
+class Library;
 class MediaBin;
 class QCheckBox;
 class QComboBox;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -23,7 +25,7 @@ class StyleEditor;
 class SlideEditor : public QDialog {
     Q_OBJECT
 public:
-    SlideEditor(const Presentation &p, int startIndex, MediaBin *media, QWidget *parent = nullptr);
+    SlideEditor(const Presentation &p, int startIndex, MediaBin *media, Library *library, QWidget *parent = nullptr);
     Presentation presentation() const { return m_pres; }
 
 private:
@@ -31,6 +33,8 @@ private:
     TextBox *box();
     void buildUi();
     void refreshSlideList();
+    void refreshSlideIcon(int index);
+    void addMediaSlides(const QStringList &paths);
     void loadSlide();
     void loadBox();
     void loadText();
@@ -45,6 +49,7 @@ private:
     int m_box = 0;
     bool m_loading = false;
     MediaBin *m_media;
+    Library *m_library;
 
     QLineEdit *m_title, *m_author, *m_copyright, *m_ccli;
     QListWidget *m_slides;
@@ -67,6 +72,11 @@ private:
     QCheckBox *m_loop;
 
     QComboBox *m_boxPicker;
+    QGroupBox *m_imageGroup, *m_shapeGroup;
+    QLabel *m_imagePath;
+    QComboBox *m_imageFit;
+    ColorButton *m_fill;
+    QSpinBox *m_radius, *m_opacity;
     QCheckBox *m_boxMain;
     RectEditor *m_rect;
     StyleEditor *m_style;

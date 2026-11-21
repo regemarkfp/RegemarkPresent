@@ -1,4 +1,5 @@
 #include "core/AppSettings.h"
+#include "bible/BiblePanel.h"
 #include "core/Library.h"
 #include "ui/MainWindow.h"
 #include "ui/MediaBin.h"
@@ -10,6 +11,7 @@
 #include <QCommandLineParser>
 #include <QIcon>
 #include <QListWidget>
+#include <QTabWidget>
 #include <QTimer>
 
 int main(int argc, char *argv[])
@@ -50,7 +52,7 @@ int main(int argc, char *argv[])
         const QList<Presentation> songs = library.presentations();
         if (songs.isEmpty()) return 1;
         MediaBin media;
-        SlideEditor editor(songs.first(), 1, &media);
+        SlideEditor editor(songs.first(), 1, &media, &library);
         editor.show();
         QTimer::singleShot(1500, &editor, [&] {
             editor.grab().save(args.value(grabEditor));
@@ -71,6 +73,15 @@ int main(int argc, char *argv[])
                     emit playlist->itemClicked(playlist->item(i));
                     break;
                 }
+            // RP_GRAB_REF="John 3:16" shows the Bible tab with that passage instead.
+            const QString ref = qEnvironmentVariable("RP_GRAB_REF");
+            if (!ref.isEmpty()) {
+                if (auto *tabs = w.findChild<QTabWidget *>()) tabs->setCurrentIndex(2);
+                if (auto *bible = w.findChild<BiblePanel *>()) {
+                    bible->showReference(ref);
+                    emit bible->presentationReady(bible->currentPresentation());
+                }
+            }
             auto *grid = w.findChild<QListWidget *>("slideGrid");
             if (grid && grid->count() > 1) emit grid->itemClicked(grid->item(1));
         });

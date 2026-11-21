@@ -178,7 +178,40 @@ QJsonObject TextBox::toJson() const
         {"main", isMain},
     };
     if (!runs.isEmpty()) o["runs"] = runs;
+    if (kind == Kind::Image) {
+        o["kind"] = "image";
+        o["image"] = imagePath;
+        o["imageFit"] = int(imageFit);
+    } else if (kind == Kind::Shape) {
+        o["kind"] = "shape";
+        o["fill"] = colorToString(fill);
+        o["radius"] = cornerRadius;
+    }
+    if (opacity < 1.0) o["opacity"] = opacity;
     return o;
+}
+
+TextBox TextBox::image(const QString &path)
+{
+    TextBox b;
+    b.kind = Kind::Image;
+    b.id = newId();
+    b.imagePath = path;
+    b.isMain = false;
+    b.rect = QRectF(0.3, 0.25, 0.4, 0.5);
+    return b;
+}
+
+TextBox TextBox::shape(const QColor &fill)
+{
+    TextBox b;
+    b.kind = Kind::Shape;
+    b.id = newId();
+    b.fill = fill;
+    b.cornerRadius = 24;
+    b.isMain = false;
+    b.rect = QRectF(0.1, 0.65, 0.8, 0.25);
+    return b;
 }
 
 TextBox TextBox::fromJson(const QJsonObject &o)
@@ -195,6 +228,14 @@ TextBox TextBox::fromJson(const QJsonObject &o)
     b.buildDelayMs = o["buildDelay"].toInt(0);
     b.buildDurationMs = o["buildDuration"].toInt(500);
     b.isMain = o["main"].toBool(true);
+    const QString kind = o["kind"].toString();
+    if (kind == "image") b.kind = Kind::Image;
+    else if (kind == "shape") b.kind = Kind::Shape;
+    b.imagePath = o["image"].toString();
+    b.imageFit = FitMode(qBound(0, o["imageFit"].toInt(int(FitMode::Fit)), 2));
+    b.fill = colorFromString(o["fill"].toString(), b.fill);
+    b.cornerRadius = o["radius"].toDouble(0);
+    b.opacity = o["opacity"].toDouble(1.0);
     return b;
 }
 
@@ -203,8 +244,10 @@ TextBox TextBox::fromJson(const QJsonObject &o)
 QString Slide::mainText() const
 {
     for (const TextBox &b : boxes)
-        if (b.isMain) return b.text;
-    return boxes.isEmpty() ? QString() : boxes.first().text;
+        if (b.isMain && b.isText()) return b.text;
+    for (const TextBox &b : boxes)
+        if (b.isText()) return b.text;
+    return {};
 }
 
 QColor Slide::colorForLabel(const QString &label)
@@ -249,6 +292,14 @@ Slide Slide::fromJson(const QJsonObject &o)
 
 // ---- Presentation ---------------------------------------------------------
 
+static QJsonArray arrangementsJson(const QList<Arrangement> &list)
+{
+    QJsonArray a;
+    for (const Arrangement &arr : list)
+        a.append(QJsonObject{{"name", arr.name}, {"groups", QJsonArray::fromStringList(arr.groups)}});
+    return a;
+}
+
 Background Presentation::effectiveBackground(int index) const
 {
     for (int i = qMin(index, int(slides.size()) - 1); i >= 0; --i)
@@ -277,6 +328,71 @@ Slide Presentation::makeSlide(const QString &label, const QString &text) const
     return s;
 }
 
+QStringList Presentation::groups() const
+{
+    QStringList out;
+    for (const Slide &s : slides)
+        if (!out.contains(s.label)) out << s.label;
+    return out;
+}
+
+QList<int> Presentation::playOrder() const
+{
+    QList<int> order;
+    if (activeArrangement < 0 || activeArrangement >= arrangements.size()) {
+        for (int i = 0; i < slides.size(); ++i) order << i;
+        return order;
+    }
+    for (const QString &g : arrangements[activeArrangement].groups)
+        for (int i = 0; i < slides.size(); ++i)
+            if (slides[i].label == g) order << i;
+    return order;
+}
+
+Presentation Presentation::arranged(QList<int> *sourceIndex) const
+{
+    const QList<int> order = playOrder();
+    if (sourceIndex) *sourceIndex = order;
+    if (activeArrangement < 0) return *this;
+    Presentation p = *this;
+    p.slides.clear();
+    for (int i : order) p.slides.append(slides[i]);
+    return p;
+}
+
+void Presentation::applyLook(const Look &look)
+{
+    defaultStyle = look.style;
+    defaultTransition = look.transition;
+    if (look.background.isSet()) defaultBackground = look.background;
+    for (Slide &s : slides)
+        for (TextBox &b : s.boxes)
+            if (b.isMain) {
+                b.style = look.style;
+                b.rect = look.rect;
+            }
+}
+
+QJsonObject Look::toJson() const
+{
+    return {{"format", "regemarkpresent.look"}, {"id", id}, {"name", name}, {"style", style.toJson()},
+            {"rect", QJsonArray{rect.x(), rect.y(), rect.width(), rect.height()}},
+            {"background", background.toJson()}, {"transition", transition.toJson()}};
+}
+
+Look Look::fromJson(const QJsonObject &o)
+{
+    Look l;
+    l.id = o["id"].toString(newId());
+    l.name = o["name"].toString();
+    l.style = TextStyle::fromJson(o["style"].toObject());
+    const QJsonArray r = o["rect"].toArray();
+    if (r.size() == 4) l.rect = QRectF(r[0].toDouble(), r[1].toDouble(), r[2].toDouble(), r[3].toDouble());
+    l.background = Background::fromJson(o["background"].toObject());
+    l.transition = Transition::fromJson(o["transition"].toObject());
+    return l;
+}
+
 QJsonObject Presentation::toJson() const
 {
     QJsonArray s;
@@ -289,6 +405,8 @@ QJsonObject Presentation::toJson() const
         {"defaultTransition", defaultTransition.toJson()},
         {"defaultStyle", defaultStyle.toJson()},
         {"loop", loop},
+        {"arrangements", arrangementsJson(arrangements)},
+        {"activeArrangement", activeArrangement},
     };
 }
 
@@ -306,5 +424,12 @@ Presentation Presentation::fromJson(const QJsonObject &o)
     p.defaultTransition = Transition::fromJson(o["defaultTransition"].toObject());
     p.defaultStyle = TextStyle::fromJson(o["defaultStyle"].toObject());
     p.loop = o["loop"].toBool(false);
+    for (const QJsonValue &v : o["arrangements"].toArray()) {
+        Arrangement a;
+        a.name = v.toObject()["name"].toString();
+        for (const QJsonValue &g : v.toObject()["groups"].toArray()) a.groups << g.toString();
+        p.arrangements.append(a);
+    }
+    p.activeArrangement = qBound(-1, o["activeArrangement"].toInt(-1), int(p.arrangements.size()) - 1);
     return p;
 }
