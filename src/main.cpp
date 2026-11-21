@@ -82,6 +82,9 @@ int main(int argc, char *argv[])
                     emit bible->presentationReady(bible->currentPresentation());
                 }
             }
+            const QString tab = qEnvironmentVariable("RP_GRAB_TAB");   // e.g. 3 = SongSelect
+            if (!tab.isEmpty())
+                if (auto *tabs = w.findChild<QTabWidget *>()) tabs->setCurrentIndex(tab.toInt());
             auto *grid = w.findChild<QListWidget *>("slideGrid");
             if (grid && grid->count() > 1) emit grid->itemClicked(grid->item(1));
         });

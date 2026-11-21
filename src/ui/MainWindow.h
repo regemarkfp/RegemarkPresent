@@ -13,6 +13,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QStackedWidget;
 class QTabWidget;
 class ShowController;
 class SongSelectBrowser;
@@ -51,6 +52,7 @@ private:
     void importFiles(const QStringList &files, bool quiet);
     void importDecks(const QStringList &files);
     void openSongSelect();
+    void ensureSongSelect();
     void editPresentation(int slideIndex = 0);
     void deletePresentation();
     void saveCurrent();
@@ -100,4 +102,6 @@ private:
     QList<QLabel *> m_previewStatus;
     MediaBin *m_media;
     SongSelectBrowser *m_songSelect = nullptr;
+    QStackedWidget *m_centerStack;
+    QListWidget *m_songSelectLog;
 };

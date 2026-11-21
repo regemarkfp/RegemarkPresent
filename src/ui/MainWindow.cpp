@@ -45,6 +45,7 @@
 #include <QScrollArea>
 #include <QShortcut>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -204,7 +205,37 @@ void MainWindow::buildUi()
         statusBar()->showMessage(tr("Added %1 to the playlist").arg(saved.title), 5000);
     });
     // The search box doesn't apply to the Bible tab, which has its own reference field.
-    connect(m_leftTabs, &QTabWidget::currentChanged, this, [this](int i) { m_search->setVisible(i != 2); });
+    // SongSelect tab: the site itself fills the centre; this side explains.
+    auto *ssL = new QVBoxLayout;
+    auto *ssInfo = new QLabel(tr("<b>SongSelect</b><br>Search and download in the main area with your church's "
+                                 "CCLI account. Each download goes straight into Songs."));
+    ssInfo->setWordWrap(true);
+    ssInfo->setProperty("role", "hint");
+    ssL->addWidget(ssInfo);
+    m_songSelectLog = new QListWidget;
+    m_songSelectLog->setToolTip(tr("Songs imported from SongSelect this session. Click one to open it."));
+    ssL->addWidget(sectionLabel(tr("Imported")));
+    ssL->addWidget(m_songSelectLog, 1);
+    auto *ssBack = new QPushButton(tr("Back to my songs"));
+    ssL->addWidget(ssBack);
+    auto *ssPanel = panel(ssL);
+    ssL->setContentsMargins(0, 8, 0, 0);
+    m_leftTabs->addTab(ssPanel, tr("SongSelect"));
+    connect(ssBack, &QPushButton::clicked, this, [this] { m_leftTabs->setCurrentIndex(0); });
+    connect(m_songSelectLog, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+        m_leftTabs->setCurrentIndex(0);
+        showPresentation(item->data(Qt::UserRole).toString());
+    });
+
+    connect(m_leftTabs, &QTabWidget::currentChanged, this, [this](int i) {
+        m_search->setVisible(i < 2);
+        if (i == 3) {
+            ensureSongSelect();
+            m_centerStack->setCurrentWidget(m_songSelect);
+        } else {
+            m_centerStack->setCurrentIndex(0);
+        }
+    });
     auto *libL = new QVBoxLayout;
     libL->addWidget(m_search);
     libL->addWidget(m_leftTabs, 1);
@@ -282,7 +313,10 @@ void MainWindow::buildUi()
     m_grid->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_grid->setContextMenuPolicy(Qt::ActionsContextMenu);
     cL->addWidget(m_grid, 1);
-    split->addWidget(panel(cL));
+    // The centre shows the slide grid, or SongSelect while its tab is open.
+    m_centerStack = new QStackedWidget;
+    m_centerStack->addWidget(panel(cL));
+    split->addWidget(m_centerStack);
     connect(editBtn, &QPushButton::clicked, this, [this] { editPresentation(qMax(0, m_grid->currentRow())); });
 
     // ---- Right: live outputs + clear buttons over the media bin -------------
@@ -1019,14 +1053,25 @@ void MainWindow::importFiles(const QStringList &files, bool quiet)
 
 void MainWindow::openSongSelect()
 {
-    if (!m_songSelect) {
-        m_songSelect = new SongSelectBrowser(this);
-        connect(m_songSelect, &SongSelectBrowser::songFileReady, this,
-                [this](const QString &path) { importFiles({path}, true); });
-    }
-    m_songSelect->show();
-    m_songSelect->raise();
-    m_songSelect->activateWindow();
+    m_leftTabs->setCurrentIndex(3);
+}
+
+void MainWindow::ensureSongSelect()
+{
+    // Created on first use: the embedded browser is heavy and needs the network.
+    if (m_songSelect) return;
+    m_songSelect = new SongSelectBrowser;
+    m_centerStack->addWidget(m_songSelect);
+    connect(m_songSelect, &SongSelectBrowser::songFileReady, this, [this](const QString &path) {
+        importFiles({path}, true);
+        if (!m_hasCurrent) return;
+        // Newest first, without repeats, so the operator can jump to what they just got.
+        for (int i = 0; i < m_songSelectLog->count(); ++i)
+            if (m_songSelectLog->item(i)->data(Qt::UserRole).toString() == m_current.id) delete m_songSelectLog->takeItem(i);
+        auto *item = new QListWidgetItem(m_current.title);
+        item->setData(Qt::UserRole, m_current.id);
+        m_songSelectLog->insertItem(0, item);
+    });
 }
 
 void MainWindow::editPresentation(int slideIndex)

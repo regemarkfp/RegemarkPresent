@@ -31,18 +31,16 @@ bool SongSelectBrowser::embedded()
 #endif
 }
 
-SongSelectBrowser::SongSelectBrowser(QWidget *parent) : QDialog(parent)
+SongSelectBrowser::SongSelectBrowser(QWidget *parent) : QWidget(parent)
 {
-    setWindowTitle(tr("SongSelect"));
-    setWindowFlag(Qt::WindowMaximizeButtonHint);
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(10, 10, 10, 10);
 
     m_status = new QLabel;
     m_status->setProperty("role", "hint");
     m_status->setWordWrap(true);
 
 #ifdef RP_HAVE_WEBENGINE
-    resize(1280, 860);
     // A named profile keeps cookies on disk, so the operator signs in once.
     auto *profile = new QWebEngineProfile(QStringLiteral("songselect"), this);
     profile->setPersistentStoragePath(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/web/songselect");
@@ -80,18 +78,17 @@ SongSelectBrowser::SongSelectBrowser(QWidget *parent) : QDialog(parent)
         connect(d, &QWebEngineDownloadRequest::isFinishedChanged, this, [this, d] {
             if (d->state() != QWebEngineDownloadRequest::DownloadCompleted) return;
             const QString path = QDir(d->downloadDirectory()).filePath(d->downloadFileName());
-            notify(tr("Imported \"%1\". Download another, or close this window.").arg(QFileInfo(path).completeBaseName()));
+            notify(tr("Imported \"%1\" into your Songs.").arg(QFileInfo(path).completeBaseName()));
             emit songFileReady(path);
         });
         d->accept();
     });
     view->load(kHome);
 #else
-    resize(560, 260);
     auto *title = new QLabel(tr("<b>Get songs from SongSelect</b>"));
     layout->addWidget(title);
     auto *how = new QLabel(tr("SongSelect opens in your web browser. Sign in, find a song and click Download "
-                              "(lyrics, ChordPro or USR). While this window stays open, new song files in your "
+                              "(lyrics, ChordPro or USR). While this tab is open, new song files in your "
                               "Downloads folder are imported automatically."));
     how->setWordWrap(true);
     layout->addWidget(how);
