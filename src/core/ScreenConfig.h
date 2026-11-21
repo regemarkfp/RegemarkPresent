@@ -55,6 +55,10 @@ struct ScreenConfig {
     QList<OutputTarget> targets;
 
     double scale() const { return resolution.height() / 1080.0; }
+    // This screen's look while `active` is live (its own when the look
+    // doesn't customise this screen, or no look is active).
+    ScreenLook lookIn(const Look *active) const;
+    ScreenConfig withLook(const Look *active) const;
     QJsonObject toJson() const;
     static ScreenConfig fromJson(const QJsonObject &o);
     static ScreenConfig defaults(ScreenRole role);

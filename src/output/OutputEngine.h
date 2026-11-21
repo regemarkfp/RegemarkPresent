@@ -23,6 +23,8 @@ public:
 
     void configure(const QList<ScreenConfig> &screens);
     void setOutputsEnabled(bool enabled);
+    // Switch what screens show (a look change) without touching their outputs.
+    void setLooks(const QList<ScreenLook> &looks);
     bool outputsEnabled() const { return m_enabled; }
 
     int screenCount() const { return int(m_screens.size()); }

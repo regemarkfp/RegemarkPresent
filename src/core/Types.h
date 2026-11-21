@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
@@ -118,7 +119,9 @@ struct Arrangement {
     QStringList groups;              // slide labels, may repeat
 };
 
-// A reusable look: text style and position, background and transition.
+// A named look, like ProPresenter's: what every screen shows while it is
+// active (switched live from the toolbar), plus a slide style (text,
+// position, background, transition) that can be applied to songs.
 struct Look {
     QString id;
     QString name;
@@ -126,6 +129,9 @@ struct Look {
     QRectF rect = QRectF(0.05, 0.1, 0.9, 0.8);
     Background background;
     Transition transition;
+    // Per-screen settings while this look is live, keyed by screen id
+    // (ScreenLook JSON, see ScreenConfig.h). Screens not listed keep their own.
+    QHash<QString, QJsonObject> screens;
 
     QJsonObject toJson() const;
     static Look fromJson(const QJsonObject &o);

@@ -47,6 +47,8 @@ set(SOURCES
     src/ui/TimerPanel.cpp
     src/ui/SlideCanvas.cpp
     src/ui/ArrangementDialog.cpp
+    src/ui/ScreenLookEditor.cpp
+    src/ui/LooksDialog.cpp
 )
 
 if(DECKLINK_SDK_DIR)

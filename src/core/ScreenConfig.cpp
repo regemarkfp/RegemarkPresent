@@ -61,6 +61,19 @@ ScreenLook ScreenLook::fromJson(const QJsonObject &o)
     return l;
 }
 
+ScreenLook ScreenConfig::lookIn(const Look *active) const
+{
+    if (active && active->screens.contains(id)) return ScreenLook::fromJson(active->screens.value(id));
+    return look;
+}
+
+ScreenConfig ScreenConfig::withLook(const Look *active) const
+{
+    ScreenConfig c = *this;
+    c.look = lookIn(active);
+    return c;
+}
+
 QString ScreenConfig::roleName(ScreenRole r)
 {
     switch (r) {

@@ -2,6 +2,7 @@
 
 #include "core/AppSettings.h"
 #include "core/Library.h"
+#include "render/ScreenRenderer.h"
 
 #include <QMainWindow>
 
@@ -66,12 +67,17 @@ private:
     QString countdownPresentationId();
     void advanceRundown();
     int rundownInsertRow() const;
+    QIcon rundownThumb(const Presentation &p);
     QMenu *addItemMenu();
     QStringList pickFromLibrary(bool songs);
     void addServiceSection(const QString &name);
     void removeRundownRow();
     void newDeckPresentation();
     void showUnsaved(const Presentation &p);
+    void refreshLookBox();
+    void applyActiveLook();
+    void openLooks();
+    LiveState sampleState() const;
     QListWidget *activeLibraryList() const;
     void refreshArrangements();
     void editArrangement(int index);
@@ -102,7 +108,9 @@ private:
     Presentation m_view;            // in playing order (active arrangement)
     QList<int> m_viewMap;           // view slide -> m_current slide
     QComboBox *m_arrangementBox;
-    int m_pendingRundownRow = -1;   // row to select after the rundown reloads
+    int m_pendingRundownRow = -1;
+    QComboBox *m_lookBox = nullptr;
+    QHash<QString, QIcon> m_rundownThumbs;   // row to select after the rundown reloads
     bool m_hasCurrent = false;
     int m_playlistRow = -1;
 

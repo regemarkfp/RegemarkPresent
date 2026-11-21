@@ -34,6 +34,17 @@ void OutputEngine::configure(const QList<ScreenConfig> &screens)
     }
 }
 
+void OutputEngine::setLooks(const QList<ScreenLook> &looks)
+{
+    const qint64 now = m_clock.elapsed();
+    for (size_t i = 0; i < m_screens.size() && int(i) < looks.size(); ++i) {
+        ScreenConfig cfg = m_screens[i]->renderer.config();
+        cfg.look = looks[int(i)];
+        m_screens[i]->renderer.setConfig(cfg);
+        m_screens[i]->renderer.setState(m_show->state(), now);
+    }
+}
+
 void OutputEngine::setOutputsEnabled(bool enabled)
 {
     if (enabled == m_enabled) return;

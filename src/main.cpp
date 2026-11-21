@@ -3,6 +3,7 @@
 #include "bible/BibleLibrary.h"
 #include "bible/BiblePanel.h"
 #include "core/Library.h"
+#include "ui/LooksDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/MediaBin.h"
 #include "ui/SlideCanvas.h"
@@ -39,6 +40,8 @@ int main(int argc, char *argv[])
     args.addOption(grabEditor);
     QCommandLineOption grabBibles("grab-bibles", "Save a screenshot of Get Bibles (online catalogue) to <file> and exit (diagnostics).", "file");
     args.addOption(grabBibles);
+    QCommandLineOption grabLooks("grab-looks", "Save a screenshot of the look editor (tab N via RP_GRAB_TAB) to <file> and exit (diagnostics).", "file");
+    args.addOption(grabLooks);
     args.process(app);
 
     if (args.isSet(grabScreens)) {
@@ -58,6 +61,31 @@ int main(int argc, char *argv[])
         dlg.show();
         QTimer::singleShot(8000, &dlg, [&] {   // give the catalogue time to download
             dlg.grab().save(args.value(grabBibles));
+            QApplication::exit(0);
+        });
+        return app.exec();
+    }
+
+    if (args.isSet(grabLooks)) {
+        Library library(qEnvironmentVariable("RP_LIBRARY_DIR"));
+        library.load();
+        MediaBin media;
+        LiveState sample;
+        sample.hasSlide = true;
+        const QList<Presentation> songs = library.presentations();
+        Presentation p = songs.isEmpty() ? Presentation() : songs.first();
+        sample.slide = p.slides.isEmpty() ? p.makeSlide("Verse 1", "Sample") : p.slides.first();
+        sample.hasNext = p.slides.size() > 1;
+        if (sample.hasNext) sample.next = p.slides[1];
+        sample.title = p.title;
+        sample.count = p.slides.size();
+        sample.index = 0;
+        sample.background = p.effectiveBackground(0);
+        LooksDialog dlg(&library, AppSettings::load().screens, sample, &media);
+        dlg.show();
+        if (auto *tabs = dlg.findChild<QTabWidget *>()) tabs->setCurrentIndex(qEnvironmentVariableIntValue("RP_GRAB_TAB"));
+        QTimer::singleShot(1500, &dlg, [&] {
+            dlg.grab().save(args.value(grabLooks));
             QApplication::exit(0);
         });
         return app.exec();

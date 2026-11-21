@@ -9,6 +9,7 @@
 #include "bible/BibleLibrary.h"
 #include "bible/BiblePanel.h"
 #include "ui/ArrangementDialog.h"
+#include "ui/LooksDialog.h"
 #include "ui/MediaBin.h"
 #include "ui/ScreenSetupDialog.h"
 #include "ui/SlideEditor.h"
@@ -76,8 +77,19 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     buildUi();
     buildActions();
 
-    connect(m_library, &Library::presentationsChanged, this, &MainWindow::refreshLibrary);
+    connect(m_library, &Library::presentationsChanged, this, [this] {
+        m_rundownThumbs.clear();
+        refreshLibrary();
+    });
+    connect(m_library, &Library::presentationChanged, this, [this](const QString &id) {
+        m_rundownThumbs.remove(id);
+        refreshPlaylistItems();
+    });
     connect(m_library, &Library::playlistsChanged, this, &MainWindow::refreshPlaylists);
+    connect(m_library, &Library::looksChanged, this, [this] {
+        refreshLookBox();
+        applyActiveLook();
+    });
     connect(m_show, &ShowController::stateChanged, this, &MainWindow::updateGridIcons);
     // Automatic advances (timed slides, finished videos) that run past the end
     // of an item carry on through the Pre-Service loop.
@@ -97,6 +109,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     connect(m_media, &MediaBin::applyToPresentation, this, &MainWindow::applyMediaToPresentation);
     connect(m_media, &MediaBin::createCue, this, &MainWindow::createMediaCue);
     connect(m_media, &MediaBin::posterReady, this, [this] {
+        m_rundownThumbs.clear();   // video backgrounds now have a still
+        refreshPlaylistItems();
         if (m_hasCurrent) refreshGrid();
     });
 
@@ -106,6 +120,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_biblePanel->setTemplate(scriptureTemplate);
     m_media->setFolders(m_settings.mediaFolders);
     m_engine->configure(m_settings.screens);
+    applyActiveLook();
     buildPreviews();
 
     auto *previewTimer = new QTimer(this);
@@ -266,6 +281,7 @@ void MainWindow::buildUi()
     m_playlist->setObjectName("playlist");
     m_playlist->setDragDropMode(QAbstractItemView::InternalMove);
     m_playlist->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_playlist->setIconSize(QSize(64, 36));
     plL->addWidget(m_playlist, 1);
     auto *plBtns = new QHBoxLayout;
     auto *plAdd = new QPushButton(tr("+ Add item"));
@@ -497,6 +513,24 @@ void MainWindow::buildActions()
     auto *spacer = new QWidget;
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     tb->addWidget(spacer);
+    auto *lookLabel = new QLabel(tr("Look "));
+    lookLabel->setProperty("role", "hint");
+    tb->addWidget(lookLabel);
+    m_lookBox = new QComboBox;
+    m_lookBox->setMinimumWidth(170);
+    m_lookBox->setToolTip(tr("What every screen shows right now. Edit looks from the Looks menu."));
+    tb->addWidget(m_lookBox);
+    connect(m_lookBox, &QComboBox::activated, this, [this](int i) {
+        if (i == m_lookBox->count() - 1) {   // "Edit looks…"
+            refreshLookBox();
+            openLooks();
+            return;
+        }
+        m_settings.activeLookId = m_lookBox->itemData(i).toString();
+        m_settings.save();
+        applyActiveLook();
+    });
+    tb->addSeparator();
 
     QMenu *screens = menuBar()->addMenu(tr("&Screens"));
     add(screens, tr("Screens…"), [this] { openScreenSetup(); });
@@ -512,6 +546,8 @@ void MainWindow::buildActions()
     QMenu *looksMenu = menuBar()->addMenu(tr("&Looks"));
     connect(looksMenu, &QMenu::aboutToShow, this, [this, looksMenu] {
         looksMenu->clear();
+        looksMenu->addAction(tr("Edit looks…"), this, [this] { openLooks(); });
+        looksMenu->addSeparator();
         QMenu *def = looksMenu->addMenu(tr("Default look for new songs"));
         auto *group = new QActionGroup(def);
         auto addChoice = [&](const QString &name, const QString &id) {
@@ -750,12 +786,38 @@ void MainWindow::refreshPlaylistItems()
             f.setBold(true);
         } else {
             const Presentation *pres = m_library->find(i.presentationId);
-            item->setText(QStringLiteral("      %1  %2").arg(itemGlyph(pres), pres ? pres->title : tr("(missing item)")));
+            item->setText(QStringLiteral("%1  %2").arg(itemGlyph(pres), pres ? pres->title : tr("(missing item)")));
+            if (pres) item->setIcon(rundownThumb(*pres));
         }
         item->setFont(f);
         m_playlist->addItem(item);
     }
     m_playlist->setCurrentRow(qMin(row, m_playlist->count() - 1));
+}
+
+QIcon MainWindow::rundownThumb(const Presentation &p)
+{
+    // First slide as the rundown sees it; cached until the item changes.
+    auto it = m_rundownThumbs.constFind(p.id);
+    if (it != m_rundownThumbs.constEnd()) return it.value();
+    QImage img(64, 36, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::black);
+    const Presentation view = p.arranged();
+    if (!view.slides.isEmpty()) {
+        const Background bg = view.effectiveBackground(0);
+        const QImage poster = bg.type == Background::Type::Image || bg.type == Background::Type::Video
+                                  ? m_media->poster(bg.path) : QImage();
+        // Render larger and scale down so text stays recognisable as shapes.
+        img = TextRenderer::renderSlide(view.slides.first(), bg, QSize(256, 144), nullptr, poster)
+                  .scaled(64, 36, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+    QPainter painter(&img);
+    painter.setPen(QColor(255, 255, 255, 60));
+    painter.drawRect(img.rect().adjusted(0, 0, -1, -1));
+    painter.end();
+    const QIcon icon(QPixmap::fromImage(img));
+    m_rundownThumbs.insert(p.id, icon);
+    return icon;
 }
 
 int MainWindow::rundownInsertRow() const
@@ -1406,6 +1468,65 @@ void MainWindow::showCountdownSlide()
     takeSlide(0);
 }
 
+void MainWindow::refreshLookBox()
+{
+    if (!m_lookBox) return;
+    const QSignalBlocker block(m_lookBox);
+    m_lookBox->clear();
+    m_lookBox->addItem(tr("Screens' own"), QString());
+    for (const Look &l : m_library->looks()) m_lookBox->addItem(l.name, l.id);
+    m_lookBox->addItem(tr("Edit looks…"), QStringLiteral("__edit"));
+    const int i = m_lookBox->findData(m_settings.activeLookId);
+    m_lookBox->setCurrentIndex(i >= 0 ? i : 0);
+}
+
+void MainWindow::applyActiveLook()
+{
+    const Look *active = m_library->look(m_settings.activeLookId);
+    QList<ScreenLook> looks;
+    for (const ScreenConfig &cfg : std::as_const(m_settings.screens)) looks << cfg.lookIn(active);
+    m_engine->setLooks(looks);
+}
+
+LiveState MainWindow::sampleState() const
+{
+    // Preview looks with what's live, else the open item, else a sample lyric.
+    if (m_show->state().hasSlide) return m_show->state();
+    LiveState s;
+    s.hasSlide = true;
+    if (m_hasCurrent && !m_view.slides.isEmpty()) {
+        s.slide = m_view.slides.first();
+        s.hasNext = m_view.slides.size() > 1;
+        if (s.hasNext) s.next = m_view.slides[1];
+        s.title = m_view.title;
+        s.index = 0;
+        s.count = m_view.slides.size();
+        s.background = m_view.effectiveBackground(0);
+    } else {
+        Presentation p;
+        s.slide = p.makeSlide(tr("Verse 1"), tr("Amazing grace how sweet the sound\nThat saved a wretch like me"));
+        s.next = p.makeSlide(tr("Verse 1"), tr("I once was lost but now am found\nWas blind but now I see"));
+        s.hasNext = true;
+        s.title = tr("Amazing Grace");
+        s.index = 0;
+        s.count = 2;
+        s.background = Background::solid(QColor(40, 30, 70));
+    }
+    return s;
+}
+
+void MainWindow::openLooks()
+{
+    LooksDialog dlg(m_library, m_settings.screens, sampleState(), m_media, this);
+    dlg.select(m_settings.activeLookId);
+    // Edits to the live look show on the real outputs straight away.
+    connect(&dlg, &LooksDialog::lookEdited, this, [this](const QString &id) {
+        if (id == m_settings.activeLookId) applyActiveLook();
+    });
+    dlg.exec();
+    refreshLookBox();
+}
+
 void MainWindow::openScreenSetup()
 {
     ScreenSetupDialog dlg(m_settings.screens, this);
@@ -1413,6 +1534,7 @@ void MainWindow::openScreenSetup()
     m_settings.screens = dlg.screens();
     m_settings.save();
     m_engine->configure(m_settings.screens);
+    applyActiveLook();
     buildPreviews();
 }
 

@@ -375,9 +375,12 @@ void Presentation::applyLook(const Look &look)
 
 QJsonObject Look::toJson() const
 {
+    QJsonObject perScreen;
+    for (auto it = screens.constBegin(); it != screens.constEnd(); ++it) perScreen[it.key()] = it.value();
     return {{"format", "regemarkpresent.look"}, {"id", id}, {"name", name}, {"style", style.toJson()},
             {"rect", QJsonArray{rect.x(), rect.y(), rect.width(), rect.height()}},
-            {"background", background.toJson()}, {"transition", transition.toJson()}};
+            {"background", background.toJson()}, {"transition", transition.toJson()},
+            {"screens", perScreen}};
 }
 
 Look Look::fromJson(const QJsonObject &o)
@@ -390,6 +393,8 @@ Look Look::fromJson(const QJsonObject &o)
     if (r.size() == 4) l.rect = QRectF(r[0].toDouble(), r[1].toDouble(), r[2].toDouble(), r[3].toDouble());
     l.background = Background::fromJson(o["background"].toObject());
     l.transition = Transition::fromJson(o["transition"].toObject());
+    const QJsonObject perScreen = o["screens"].toObject();
+    for (auto it = perScreen.constBegin(); it != perScreen.constEnd(); ++it) l.screens.insert(it.key(), it.value().toObject());
     return l;
 }
 

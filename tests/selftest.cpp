@@ -305,6 +305,40 @@ static void testRundown()
     CHECK(!strayHeader);
 }
 
+static void testScreenLooks()
+{
+    ScreenConfig audience = ScreenConfig::defaults(ScreenRole::Audience);
+    ScreenConfig stream = ScreenConfig::defaults(ScreenRole::Stream);
+
+    // A "Baptism" look: no text on the stream, audience untouched.
+    Look baptism;
+    baptism.id = "baptism";
+    baptism.name = "Baptism";
+    ScreenLook quiet = stream.look;
+    quiet.showText = false;
+    baptism.screens.insert(stream.id, quiet.toJson());
+
+    CHECK(!stream.lookIn(&baptism).showText);
+    CHECK(stream.lookIn(&baptism).transparent);          // the rest of the stream setup carries over
+    CHECK(audience.lookIn(&baptism).showText);           // not customised: screen's own
+    CHECK(stream.lookIn(nullptr).showText);              // no active look: screen's own
+
+    const Look back = Look::fromJson(baptism.toJson());
+    CHECK(back.screens.contains(stream.id) && !back.screens.contains(audience.id));
+    CHECK(!stream.lookIn(&back).showText);
+
+    // A stream with no text renders fully transparent.
+    MediaPool pool;
+    ScreenRenderer r(&pool);
+    r.setConfig(stream.withLook(&back));
+    LiveState st;
+    st.hasSlide = true;
+    st.slide = Presentation().makeSlide("Verse 1", "Hidden on the stream");
+    r.setState(st, 0);
+    const QImage frame = r.render(10000);
+    CHECK(qAlpha(frame.pixel(960, int(1080 * 0.85))) == 0);
+}
+
 static QString makeBackground(const QString &dir)
 {
     QImage img(1920, 1080, QImage::Format_RGB32);
@@ -390,6 +424,7 @@ int main(int argc, char **argv)
     testDecksAndArrangements();
     testDeckImport(out);
     testRundown();
+    testScreenLooks();
     testRender(out);
     std::printf("%s (%d failures), renders in %s\n", failures ? "FAILED" : "OK", failures, qPrintable(out));
     return failures ? 1 : 0;
