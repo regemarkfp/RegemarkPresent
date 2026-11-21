@@ -1,0 +1,87 @@
+cmake_minimum_required(VERSION 3.21)
+project(ChurchPresenter VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Multimedia)
+
+# DeckLink needs the Blackmagic Desktop Video SDK headers at build time.
+# Download it from blackmagicdesign.com/developer and point this at the SDK root.
+set(DECKLINK_SDK_DIR "" CACHE PATH "Path to the Blackmagic DeckLink SDK root")
+
+set(SOURCES
+    src/core/Types.cpp
+    src/core/RichText.cpp
+    src/core/ScreenConfig.cpp
+    src/core/Library.cpp
+    src/core/AppSettings.cpp
+    src/render/TextRenderer.cpp
+    src/render/MediaPool.cpp
+    src/render/ScreenRenderer.cpp
+    src/show/ShowController.cpp
+    src/output/FrameWorker.cpp
+    src/output/DisplayOutput.cpp
+    src/output/NdiOutput.cpp
+    src/output/OutputEngine.cpp
+    src/import/SongImporter.cpp
+    src/ui/MainWindow.cpp
+    src/ui/SlideEditor.cpp
+    src/ui/ScreenSetupDialog.cpp
+    src/ui/MediaBin.cpp
+    src/ui/Widgets.cpp
+)
+
+if(DECKLINK_SDK_DIR)
+    if(WIN32)
+        # The Windows SDK ships an IDL; generate the COM header + GUIDs with MIDL.
+        set(DL_GEN ${CMAKE_BINARY_DIR}/decklink)
+        file(MAKE_DIRECTORY ${DL_GEN})
+        add_custom_command(
+            OUTPUT ${DL_GEN}/DeckLinkAPI_h.h ${DL_GEN}/DeckLinkAPI_i.c
+            COMMAND midl /nologo /env x64 /h DeckLinkAPI_h.h /iid DeckLinkAPI_i.c
+                    /I ${DECKLINK_SDK_DIR}/Win/include
+                    ${DECKLINK_SDK_DIR}/Win/include/DeckLinkAPI.idl
+            WORKING_DIRECTORY ${DL_GEN}
+            DEPENDS ${DECKLINK_SDK_DIR}/Win/include/DeckLinkAPI.idl)
+        list(APPEND SOURCES src/output/DeckLinkOutput.cpp ${DL_GEN}/DeckLinkAPI_i.c)
+        set(DL_INCLUDE ${DL_GEN} ${DECKLINK_SDK_DIR}/Win/include)
+    else()
+        list(APPEND SOURCES src/output/DeckLinkOutput.cpp
+             ${DECKLINK_SDK_DIR}/Linux/include/DeckLinkAPIDispatch.cpp)
+        set(DL_INCLUDE ${DECKLINK_SDK_DIR}/Linux/include)
+    endif()
+else()
+    list(APPEND SOURCES src/output/DeckLinkStub.cpp)
+endif()
+
+# Everything except main() lives in a static library so tests can link it.
+add_library(cpcore STATIC ${SOURCES})
+target_include_directories(cpcore PUBLIC src)
+target_link_libraries(cpcore PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia)
+target_compile_definitions(cpcore PUBLIC CP_VERSION="${PROJECT_VERSION}")
+
+qt_add_executable(ChurchPresenter WIN32 src/main.cpp)
+target_link_libraries(ChurchPresenter PRIVATE cpcore)
+
+if(DECKLINK_SDK_DIR)
+    target_include_directories(cpcore PRIVATE ${DL_INCLUDE})
+    target_compile_definitions(cpcore PRIVATE CP_HAVE_DECKLINK=1)
+    if(WIN32)
+        target_link_libraries(cpcore PUBLIC ole32 oleaut32)
+    else()
+        target_link_libraries(cpcore PUBLIC dl pthread)
+    endif()
+endif()
+
+option(CP_BUILD_TESTS "Build the self-tests" ON)
+if(CP_BUILD_TESTS)
+    enable_testing()
+    qt_add_executable(cp_selftest tests/selftest.cpp)
+    target_link_libraries(cp_selftest PRIVATE cpcore)
+    add_test(NAME selftest COMMAND cp_selftest ${CMAKE_BINARY_DIR}/selftest-out)
+    set_tests_properties(selftest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+install(TARGETS ChurchPresenter RUNTIME DESTINATION .)
