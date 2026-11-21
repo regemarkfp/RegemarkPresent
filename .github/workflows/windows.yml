@@ -7,6 +7,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Needed so tagged builds can create a GitHub release.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-2022
