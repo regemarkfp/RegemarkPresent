@@ -1,5 +1,6 @@
 #include "render/MediaPool.h"
 
+#include <QAudioOutput>
 #include <QDateTime>
 #include <QMediaPlayer>
 #include <QUrl>
@@ -22,6 +23,7 @@ MediaPool::~MediaPool()
         v->player->stop();
         delete v->player;
         delete v->sink;
+        delete v->audio;
         delete v;
     }
 }
@@ -52,12 +54,22 @@ QImage MediaPool::frame(const Background &bg)
 
 MediaPool::Video *MediaPool::video(const Background &bg)
 {
-    if (Video *v = m_videos.value(bg.path)) return v;
+    if (Video *v = m_videos.value(bg.path)) {
+        if (bg.audio && !v->audio) {
+            v->audio = new QAudioOutput;
+            v->player->setAudioOutput(v->audio);
+        }
+        return v;
+    }
 
     auto *v = new Video;
     v->player = new QMediaPlayer;
     v->sink = new QVideoSink;
-    v->player->setVideoOutput(v->sink);   // no audio output: backgrounds are silent
+    v->player->setVideoOutput(v->sink);
+    if (bg.audio) {   // backgrounds stay silent; media cues may play sound
+        v->audio = new QAudioOutput;
+        v->player->setAudioOutput(v->audio);
+    }
     v->player->setLoops(bg.loop ? QMediaPlayer::Infinite : 1);
     const QString path = bg.path;
     connect(v->sink, &QVideoSink::videoFrameChanged, this, [this, v, path](const QVideoFrame &f) {
@@ -74,6 +86,21 @@ MediaPool::Video *MediaPool::video(const Background &bg)
     return v;
 }
 
+void MediaPool::restart(const Background &bg)
+{
+    if (bg.type != Background::Type::Video) return;
+    Video *v = video(bg);
+    v->lastUsed = QDateTime::currentMSecsSinceEpoch();
+    v->player->setLoops(bg.loop ? QMediaPlayer::Infinite : 1);
+    v->player->setPosition(0);
+    v->player->play();
+}
+
+void MediaPool::stop(const Background &bg)
+{
+    if (Video *v = m_videos.value(bg.path)) v->player->pause();
+}
+
 void MediaPool::reap()
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -84,6 +111,7 @@ void MediaPool::reap()
             v->player->stop();
             v->player->deleteLater();
             v->sink->deleteLater();
+            if (v->audio) v->audio->deleteLater();
             delete v;
             it = m_videos.erase(it);
         } else {

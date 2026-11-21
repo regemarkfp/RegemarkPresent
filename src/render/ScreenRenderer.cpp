@@ -2,6 +2,7 @@
 
 #include "render/MediaPool.h"
 #include "render/TextRenderer.h"
+#include "show/ShowTimer.h"
 
 #include <QEasingCurve>
 #include <QJsonDocument>
@@ -63,6 +64,9 @@ void ScreenRenderer::rebuildLayers()
 {
     m_layers.clear();
     m_confCurrent = m_confNext = QImage();
+    m_hasTokens = false;
+    for (const TextBox &b : m_state.slide.boxes)
+        if (ShowTimer::hasTokens(b.text)) m_hasTokens = true;
     const QSize res = m_cfg.resolution;
     const double scale = m_cfg.scale();
 
@@ -161,6 +165,14 @@ void ScreenRenderer::drawLayers(QPainter &p, qint64 elapsed, bool animate) const
 
 QImage ScreenRenderer::render(qint64 nowMs)
 {
+    if (m_hasTokens || m_cfg.role == ScreenRole::Confidence) {
+        const qint64 second = QDateTime::currentSecsSinceEpoch();
+        if (second != m_tokenSecond) {
+            m_tokenSecond = second;
+            if (m_hasTokens) rebuildLayers();
+        }
+    }
+
     QImage frame(m_cfg.resolution, QImage::Format_ARGB32_Premultiplied);
     frame.fill(m_cfg.look.transparent ? QColor(Qt::transparent) : QColor(Qt::black));
     QPainter p(&frame);
@@ -267,8 +279,17 @@ void ScreenRenderer::drawConfidence(QPainter &p)
         f.setBold(true);
         p.setFont(f);
         p.setPen(Qt::white);
+        QString clock = QTime::currentTime().toString("HH:mm:ss");
         p.drawText(QRect(0, 0, res.width() - qRound(res.width() * 0.03), headerH),
-                   Qt::AlignVCenter | Qt::AlignRight, QTime::currentTime().toString("HH:mm:ss"));
+                   Qt::AlignVCenter | Qt::AlignRight, clock);
+        // The countdown sits left of the clock, red in the last minute.
+        const ShowTimer *timer = ShowTimer::instance();
+        if (timer->isSet()) {
+            const int clockW = p.fontMetrics().horizontalAdvance(clock) + qRound(40 * s);
+            p.setPen(timer->remainingMs() <= 60000 ? QColor("#ff5c6c") : QColor("#c9a2ff"));
+            p.drawText(QRect(0, 0, res.width() - qRound(res.width() * 0.03) - clockW, headerH),
+                       Qt::AlignVCenter | Qt::AlignRight, QStringLiteral("⏱ ") + timer->text());
+        }
     }
     p.fillRect(QRect(0, headerH, res.width(), qMax(1, qRound(2 * s))), QColor(80, 80, 80));
 

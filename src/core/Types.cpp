@@ -45,7 +45,7 @@ bool Background::operator==(const Background &o) const
     switch (type) {
     case Type::None: return true;
     case Type::Color: return color == o.color;
-    default: return path == o.path && fit == o.fit && loop == o.loop;
+    default: return path == o.path && fit == o.fit && loop == o.loop && audio == o.audio;
     }
 }
 
@@ -67,6 +67,7 @@ QJsonObject Background::toJson() const
         o["path"] = path;
         o["fit"] = int(fit);
         o["loop"] = loop;
+        if (audio) o["audio"] = true;
     }
     return o;
 }
@@ -82,6 +83,7 @@ Background Background::fromJson(const QJsonObject &o)
     b.path = o["path"].toString();
     b.fit = FitMode(o["fit"].toInt(0));
     b.loop = o["loop"].toBool(true);
+    b.audio = o["audio"].toBool(false);
     return b;
 }
 
@@ -225,6 +227,7 @@ QJsonObject Slide::toJson() const
         {"id", id}, {"label", label}, {"labelColor", colorToString(labelColor)},
         {"boxes", b}, {"background", background.toJson()}, {"notes", notes},
     };
+    if (advanceMs > 0) o["advance"] = advanceMs;
     if (hasTransition) o["transition"] = transition.toJson();
     return o;
 }
@@ -240,6 +243,7 @@ Slide Slide::fromJson(const QJsonObject &o)
     s.hasTransition = o.contains("transition");
     if (s.hasTransition) s.transition = Transition::fromJson(o["transition"].toObject());
     s.notes = o["notes"].toString();
+    s.advanceMs = o["advance"].toInt(0);
     return s;
 }
 
@@ -284,6 +288,7 @@ QJsonObject Presentation::toJson() const
         {"defaultBackground", defaultBackground.toJson()},
         {"defaultTransition", defaultTransition.toJson()},
         {"defaultStyle", defaultStyle.toJson()},
+        {"loop", loop},
     };
 }
 
@@ -300,5 +305,6 @@ Presentation Presentation::fromJson(const QJsonObject &o)
     p.defaultBackground = Background::fromJson(o["defaultBackground"].toObject());
     p.defaultTransition = Transition::fromJson(o["defaultTransition"].toObject());
     p.defaultStyle = TextStyle::fromJson(o["defaultStyle"].toObject());
+    p.loop = o["loop"].toBool(false);
     return p;
 }

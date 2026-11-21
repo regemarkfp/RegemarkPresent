@@ -69,7 +69,15 @@ QStringList OutputEngine::status(int i) const
 void OutputEngine::onStateChanged()
 {
     const qint64 now = m_clock.elapsed();
-    for (auto &s : m_screens) s->renderer.setState(m_show->state(), now);
+    const LiveState &state = m_show->state();
+    // A video that just went live plays from its start (with sound for cues).
+    const Background bg = state.backgroundVisible ? state.background : Background();
+    if (bg != m_lastBackground) {
+        if (m_lastBackground.type == Background::Type::Video && m_lastBackground.audio) m_pool.stop(m_lastBackground);
+        if (bg.type == Background::Type::Video && (bg.audio || !bg.loop)) m_pool.restart(bg);
+    }
+    m_lastBackground = bg;
+    for (auto &s : m_screens) s->renderer.setState(state, now);
 }
 
 void OutputEngine::tick()

@@ -22,6 +22,7 @@ set(SOURCES
     src/render/MediaPool.cpp
     src/render/ScreenRenderer.cpp
     src/show/ShowController.cpp
+    src/show/ShowTimer.cpp
     src/output/FrameWorker.cpp
     src/output/DisplayOutput.cpp
     src/output/NdiOutput.cpp
@@ -34,6 +35,7 @@ set(SOURCES
     src/ui/Widgets.cpp
     src/ui/Theme.cpp
     src/ui/SongSelectBrowser.cpp
+    src/ui/TimerPanel.cpp
 )
 
 if(DECKLINK_SDK_DIR)

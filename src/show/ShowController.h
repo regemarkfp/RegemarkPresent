@@ -3,13 +3,14 @@
 #include "render/ScreenRenderer.h"
 
 #include <QObject>
+#include <QTimer>
 
 // The single source of truth for what is live. UI actions and keyboard
 // shortcuts go through here; OutputEngine renders whatever it publishes.
 class ShowController : public QObject {
     Q_OBJECT
 public:
-    explicit ShowController(QObject *parent = nullptr) : QObject(parent) {}
+    explicit ShowController(QObject *parent = nullptr);
 
     void take(const Presentation &p, int index);
     void next();
@@ -44,4 +45,5 @@ private:
     bool m_hasOverride = false;
     Background m_override;
     LiveState m_state;
+    QTimer m_advance;                // announcement loops / timed slides
 };

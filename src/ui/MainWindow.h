@@ -54,6 +54,9 @@ private:
     void applyMediaToSlides(const QString &path);
     void applyMediaToPresentation(const QString &path);
     void openScreenSetup();
+    void addToCurrentPlaylist(const QString &presentationId);
+    void createMediaCue(const QStringList &paths);
+    void showCountdownSlide();
 
     Playlist *currentPlaylist();
 

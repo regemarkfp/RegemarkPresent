@@ -21,6 +21,7 @@ public:
     void setFolders(const QStringList &folders);
     QStringList folders() const { return m_folders; }
     QString selectedPath() const;
+    QStringList selectedPaths() const;
 
     // Cached still for any media file (first frame for videos); null until ready.
     QImage poster(const QString &path);
@@ -30,6 +31,7 @@ signals:
     void sendLive(const QString &path);
     void applyToSlides(const QString &path);
     void applyToPresentation(const QString &path);
+    void createCue(const QStringList &paths);
     void posterReady(const QString &path);
 
 private:

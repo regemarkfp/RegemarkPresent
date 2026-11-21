@@ -61,6 +61,9 @@ private:
     ColorButton *m_bgColor;
     QLabel *m_bgPath;
     QComboBox *m_bgFit;
+    QCheckBox *m_bgAudio;
+    QSpinBox *m_advance;
+    QCheckBox *m_loop;
 
     QComboBox *m_boxPicker;
     QCheckBox *m_boxMain;

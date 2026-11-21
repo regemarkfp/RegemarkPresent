@@ -4,14 +4,17 @@
 #include "output/OutputEngine.h"
 #include "render/TextRenderer.h"
 #include "show/ShowController.h"
+#include "show/ShowTimer.h"
 #include "ui/MediaBin.h"
 #include "ui/ScreenSetupDialog.h"
 #include "ui/SlideEditor.h"
 #include "ui/SongSelectBrowser.h"
+#include "ui/TimerPanel.h"
 #include "ui/Theme.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDate>
@@ -20,6 +23,7 @@
 #include <QDragEnterEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QFrame>
 #include <QInputDialog>
 #include <QLabel>
@@ -34,6 +38,7 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QShortcut>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -75,6 +80,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     });
     connect(m_media, &MediaBin::applyToSlides, this, &MainWindow::applyMediaToSlides);
     connect(m_media, &MediaBin::applyToPresentation, this, &MainWindow::applyMediaToPresentation);
+    connect(m_media, &MediaBin::createCue, this, &MainWindow::createMediaCue);
     connect(m_media, &MediaBin::posterReady, this, [this] {
         if (m_hasCurrent) refreshGrid();
     });
@@ -215,6 +221,11 @@ void MainWindow::buildUi()
     clearBg->setToolTip(tr("Clear the background only"));
     clearText->setToolTip(tr("Clear the slide text only"));
     outL->addLayout(clearRow);
+    outL->addSpacing(4);
+    outL->addWidget(sectionLabel(tr("Timer")));
+    auto *timerPanel = new TimerPanel;
+    outL->addWidget(timerPanel);
+    connect(timerPanel, &TimerPanel::countdownSlideRequested, this, &MainWindow::showCountdownSlide);
 
     auto *mediaL = new QVBoxLayout;
     auto *mediaHead = new QHBoxLayout;
@@ -611,7 +622,7 @@ void MainWindow::goNext()
         if (m_hasCurrent && !m_current.slides.isEmpty()) takeSlide(0);
         return;
     }
-    if (m_show->liveIndex() + 1 < m_current.slides.size()) {
+    if (m_show->liveIndex() + 1 < m_current.slides.size() || m_current.loop) {
         m_show->next();
         return;
     }
@@ -794,6 +805,98 @@ void MainWindow::applyMediaToPresentation(const QString &path)
     if (!m_hasCurrent) return;
     m_current.defaultBackground = Background::media(path);
     saveCurrent();
+}
+
+void MainWindow::addToCurrentPlaylist(const QString &presentationId)
+{
+    Playlist *p = currentPlaylist();
+    if (!p) return;
+    p->items.append({presentationId, QString()});
+    m_library->savePlaylist(*p);
+}
+
+void MainWindow::createMediaCue(const QStringList &paths)
+{
+    if (paths.isEmpty()) return;
+    bool anyVideo = false;
+    for (const QString &path : paths)
+        anyVideo |= Background::media(path).type == Background::Type::Video;
+    const bool several = paths.size() > 1;
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("New media cue"));
+    auto *form = new QFormLayout(&dlg);
+    auto *name = new QLineEdit(several ? tr("Announcements") : QFileInfo(paths.first()).completeBaseName());
+    form->addRow(tr("Name"), name);
+    auto *sound = new QCheckBox(tr("Play video sound"));
+    sound->setChecked(anyVideo);
+    sound->setEnabled(anyVideo);
+    form->addRow(sound);
+    auto *advance = new QCheckBox(tr("Go to the next item automatically"));
+    advance->setChecked(several);
+    auto *seconds = new QSpinBox;
+    seconds->setRange(1, 600);
+    seconds->setValue(8);
+    seconds->setSuffix(tr(" s"));
+    auto *advRow = new QHBoxLayout;
+    advRow->addWidget(advance);
+    advRow->addWidget(seconds);
+    form->addRow(advRow);
+    auto *loop = new QCheckBox(tr("Loop (start again after the last item)"));
+    loop->setChecked(several);
+    form->addRow(loop);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    Presentation p;
+    p.id = newId();
+    p.title = name->text().trimmed().isEmpty() ? tr("Media") : name->text().trimmed();
+    p.category = QStringLiteral("Media");
+    p.loop = loop->isChecked();
+    p.defaultTransition.type = TransitionType::Fade;
+    p.defaultTransition.durationMs = 600;
+    for (const QString &path : paths) {
+        Slide s;
+        s.id = newId();
+        s.label = QFileInfo(path).completeBaseName();
+        s.labelColor = QColor("#2a9d8f");
+        s.background = Background::media(path);
+        s.background.audio = sound->isChecked() && s.background.type == Background::Type::Video;
+        s.background.loop = !s.background.audio;   // a video with sound plays once
+        s.background.fit = FitMode::Fit;
+        if (advance->isChecked()) s.advanceMs = seconds->value() * 1000;
+        p.slides.append(s);
+    }
+    m_library->save(p);
+    addToCurrentPlaylist(p.id);
+    showPresentation(p.id);
+    statusBar()->showMessage(tr("Created media cue \"%1\"").arg(p.title), 5000);
+}
+
+void MainWindow::showCountdownSlide()
+{
+    QString id;
+    for (const Presentation &p : m_library->presentations())
+        if (p.category == QLatin1String("Countdown")) id = p.id;
+    if (id.isEmpty()) {
+        Presentation p;
+        p.id = newId();
+        p.title = tr("Countdown");
+        p.category = QStringLiteral("Countdown");
+        Slide s = p.makeSlide(tr("Countdown"), tr("Service starts in") + QStringLiteral("\n{timer}"));
+        s.labelColor = Theme::accent;
+        p.slides.append(s);
+        m_library->save(p);
+        id = p.id;
+    }
+    if (!ShowTimer::instance()->isSet()) {
+        statusBar()->showMessage(tr("Start the timer first; the slide shows its countdown."), 6000);
+    }
+    showPresentation(id);
+    takeSlide(0);
 }
 
 void MainWindow::openScreenSetup()

@@ -73,18 +73,26 @@ MediaBin::MediaBin(QWidget *parent) : QWidget(parent)
     m_list->setSpacing(4);
     m_list->setWordWrap(true);
     m_list->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);
     layout->addWidget(m_list, 1);
 
     auto *buttons = new QHBoxLayout;
-    auto *live = new QPushButton(tr("Send live"));
+    auto *live = new QPushButton(tr("Live"));
     live->setToolTip(tr("Replace the live background now (double-click does the same)"));
-    auto *toSlides = new QPushButton(tr("→ Selected slides"));
+    auto *toSlides = new QPushButton(tr("→ Slides"));
     toSlides->setToolTip(tr("Set as the background of the selected slides; it carries forward until the next slide with its own background"));
-    auto *toPres = new QPushButton(tr("→ Whole song"));
+    auto *toPres = new QPushButton(tr("→ Song"));
     toPres->setToolTip(tr("Set as the default background of the open presentation"));
     buttons->addWidget(live);
     buttons->addWidget(toSlides);
     buttons->addWidget(toPres);
+    auto *cue = new QPushButton(tr("New cue"));
+    cue->setToolTip(tr("Make a playlist item from the selected media: video with sound, or an announcement loop"));
+    buttons->addWidget(cue);
+    connect(cue, &QPushButton::clicked, this, [this] {
+        const QStringList paths = selectedPaths();
+        if (!paths.isEmpty()) emit createCue(paths);
+    });
     layout->addLayout(buttons);
 
     auto withSelection = [this](void (MediaBin::*sig)(const QString &)) {
@@ -103,6 +111,8 @@ MediaBin::MediaBin(QWidget *parent) : QWidget(parent)
         menu.addAction(tr("Send live"), this, withSelection(&MediaBin::sendLive));
         menu.addAction(tr("Set as background of selected slides"), this, withSelection(&MediaBin::applyToSlides));
         menu.addAction(tr("Set as song background"), this, withSelection(&MediaBin::applyToPresentation));
+        menu.addSeparator();
+        menu.addAction(tr("New cue / announcement loop from selection…"), this, [this] { emit createCue(selectedPaths()); });
         menu.exec(m_list->viewport()->mapToGlobal(pos));
     });
 
@@ -158,6 +168,14 @@ QString MediaBin::selectedPath() const
 {
     const QListWidgetItem *item = m_list->currentItem();
     return item ? item->data(Qt::UserRole).toString() : QString();
+}
+
+QStringList MediaBin::selectedPaths() const
+{
+    QStringList paths;
+    for (int i = 0; i < m_list->count(); ++i)   // keep bin order, not click order
+        if (m_list->item(i)->isSelected()) paths << m_list->item(i)->data(Qt::UserRole).toString();
+    return paths;
 }
 
 QString MediaBin::cachePath(const QString &path) const

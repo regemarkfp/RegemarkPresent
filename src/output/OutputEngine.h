@@ -54,4 +54,5 @@ private:
     QTimer m_timer;
     QElapsedTimer m_clock;
     bool m_enabled = true;
+    Background m_lastBackground;
 };

@@ -1,6 +1,7 @@
 #include "render/TextRenderer.h"
 
 #include "core/RichText.h"
+#include "show/ShowTimer.h"
 
 #include <QPainter>
 #include <QTextDocument>
@@ -17,8 +18,27 @@ static QImage blurred(const QImage &src, double radius)
     return small.scaled(src.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 }
 
-QImage renderBox(const TextBox &box, const TextStyle &style, QSize size, double scale)
+static TextBox expandTokens(const TextBox &box)
 {
+    TextBox b = box;
+    b.text = ShowTimer::expand(box.text);
+    QJsonArray paragraphs;
+    for (const QJsonValue &p : box.runs) {
+        QJsonArray runs;
+        for (const QJsonValue &r : p.toArray()) {
+            QJsonObject o = r.toObject();
+            o["t"] = ShowTimer::expand(o["t"].toString());
+            runs.append(o);
+        }
+        paragraphs.append(runs);
+    }
+    b.runs = paragraphs;
+    return b;
+}
+
+QImage renderBox(const TextBox &source, const TextStyle &style, QSize size, double scale)
+{
+    const TextBox box = ShowTimer::hasTokens(source.text) ? expandTokens(source) : source;
     QImage text(size, QImage::Format_ARGB32_Premultiplied);
     text.fill(Qt::transparent);
     if (size.isEmpty() || box.text.trimmed().isEmpty()) return text;

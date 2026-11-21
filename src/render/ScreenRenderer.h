@@ -61,4 +61,6 @@ private:
     int m_bgDuration = 0;
 
     QImage m_confCurrent, m_confNext;
+    bool m_hasTokens = false;        // some text uses {timer}/{clock}: refresh every second
+    qint64 m_tokenSecond = -1;
 };

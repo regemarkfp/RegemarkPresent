@@ -177,6 +177,8 @@ void SlideEditor::buildUi()
     m_bgFit = new QComboBox;
     m_bgFit->addItems({tr("Fill (crop)"), tr("Fit (letterbox)"), tr("Stretch")});
     bgf->addRow(tr("Scaling"), m_bgFit);
+    m_bgAudio = new QCheckBox(tr("Play the video's sound (plays once)"));
+    bgf->addRow(m_bgAudio);
     sf->addRow(bgBox);
 
     auto *trBox = new QGroupBox(tr("Transition into this slide"));
@@ -199,6 +201,12 @@ void SlideEditor::buildUi()
     m_notes->setPlaceholderText(tr("Shown on confidence screens"));
     m_notes->setMaximumHeight(90);
     sf->addRow(tr("Notes"), m_notes);
+    m_advance = new QSpinBox;
+    m_advance->setRange(0, 3600);
+    m_advance->setSuffix(tr(" s"));
+    m_advance->setSpecialValueText(tr("Off"));
+    m_advance->setToolTip(tr("Go to the next slide automatically after this many seconds"));
+    sf->addRow(tr("Advance after"), m_advance);
     tabs->addTab(slideTab, tr("Slide"));
 
     // Text box tab
@@ -267,6 +275,10 @@ void SlideEditor::buildUi()
     dbRow->addWidget(defBgBin);
     dbRow->addWidget(defBgClear);
     pf->addRow(tr("Default background"), dbRow);
+    m_loop = new QCheckBox(tr("Loop: after the last slide, start again (announcements)"));
+    m_loop->setChecked(m_pres.loop);
+    pf->addRow(m_loop);
+    connect(m_loop, &QCheckBox::toggled, this, [this](bool on) { m_pres.loop = on; });
     auto *applyStyle = new QPushButton(tr("Apply this box's style to every slide"));
     applyStyle->setToolTip(tr("Copies the current main box style and position to all slides and makes it the default for new slides"));
     pf->addRow(applyStyle);
@@ -398,6 +410,14 @@ void SlideEditor::buildUi()
         slide()->background = Background::solid(c);
         loadSlide();
     });
+    connect(m_bgAudio, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_loading) return;
+        slide()->background.audio = on;
+        slide()->background.loop = !on;
+    });
+    connect(m_advance, &QSpinBox::valueChanged, this, [this](int v) {
+        if (!m_loading) slide()->advanceMs = v * 1000;
+    });
     connect(m_bgFit, &QComboBox::currentIndexChanged, this, [this](int i) {
         if (m_loading) return;
         slide()->background.fit = FitMode(i);
@@ -513,6 +533,9 @@ void SlideEditor::loadSlide()
     else
         m_bgPath->setText(tr("Inherited: %1").arg(m_pres.effectiveBackground(m_slide - 1).describe()));
     m_bgFit->setCurrentIndex(int(bg.fit));
+    m_bgAudio->setChecked(bg.audio);
+    m_bgAudio->setEnabled(bg.type == Background::Type::Video);
+    m_advance->setValue(s.advanceMs / 1000);
 
     m_boxPicker->clear();
     for (int i = 0; i < s.boxes.size(); ++i)

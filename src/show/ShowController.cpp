@@ -1,5 +1,11 @@
 #include "show/ShowController.h"
 
+ShowController::ShowController(QObject *parent) : QObject(parent)
+{
+    m_advance.setSingleShot(true);
+    connect(&m_advance, &QTimer::timeout, this, &ShowController::next);
+}
+
 void ShowController::take(const Presentation &p, int index)
 {
     if (index < 0 || index >= p.slides.size()) return;
@@ -14,7 +20,9 @@ void ShowController::take(const Presentation &p, int index)
 
 void ShowController::next()
 {
-    if (m_hasPres && m_index + 1 < m_pres.slides.size()) take(m_pres, m_index + 1);
+    if (!m_hasPres) return;
+    if (m_index + 1 < m_pres.slides.size()) take(m_pres, m_index + 1);
+    else if (m_pres.loop && !m_pres.slides.isEmpty()) take(m_pres, 0);
 }
 
 void ShowController::previous()
@@ -37,6 +45,7 @@ void ShowController::clearBackground()
 
 void ShowController::clearAll()
 {
+    m_advance.stop();
     m_hasPres = false;
     m_index = -1;
     m_hasOverride = false;
@@ -79,5 +88,9 @@ void ShowController::publish()
     }
     if (m_hasOverride) s.background = m_override;
     m_state = s;
+
+    m_advance.stop();
+    if (m_hasPres && m_textVisible && m_pres.slides[m_index].advanceMs > 0)
+        m_advance.start(m_pres.slides[m_index].advanceMs);
     emit stateChanged();
 }

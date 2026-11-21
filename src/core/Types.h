@@ -20,6 +20,7 @@ struct Background {
     QString path;
     FitMode fit = FitMode::Fill;
     bool loop = true;
+    bool audio = false;              // play the video's sound (media cues)
 
     bool isSet() const { return type != Type::None; }
     bool operator==(const Background &o) const;
@@ -90,6 +91,7 @@ struct Slide {
     bool hasTransition = false;      // false = use presentation default
     Transition transition;
     QString notes;                   // shown on confidence screens
+    int advanceMs = 0;               // > 0: go to the next slide automatically
 
     QString mainText() const;
     QJsonObject toJson() const;
@@ -108,6 +110,9 @@ struct Presentation {
     Background defaultBackground;
     Transition defaultTransition;
     TextStyle defaultStyle;
+    bool loop = false;               // after the last slide, go back to the first
+
+    bool isMediaCue() const { return category == QLatin1String("Media"); }
 
     // ProPresenter-style background builds: a slide shows its own background,
     // or the nearest one set on an earlier slide, or the presentation default.

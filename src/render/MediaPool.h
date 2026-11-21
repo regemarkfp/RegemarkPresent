@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QTimer>
 
+class QAudioOutput;
 class QMediaPlayer;
 class QVideoSink;
 
@@ -21,6 +22,11 @@ public:
 
     QImage frame(const Background &bg);
 
+    // Start a video from the top (a media cue being taken), with or without sound.
+    void restart(const Background &bg);
+    // Stop a cue's playback (and its sound) as soon as it leaves the screen.
+    void stop(const Background &bg);
+
     // Single representative frame for thumbnails (first decoded frame of a video).
     QImage poster(const QString &path) const { return m_posters.value(path); }
 
@@ -31,6 +37,7 @@ private:
     struct Video {
         QMediaPlayer *player = nullptr;
         QVideoSink *sink = nullptr;
+        QAudioOutput *audio = nullptr;
         QImage last;
         qint64 lastUsed = 0;
     };

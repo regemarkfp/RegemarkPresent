@@ -7,6 +7,8 @@
 #include "import/SongImporter.h"
 #include "render/MediaPool.h"
 #include "render/ScreenRenderer.h"
+#include "show/ShowController.h"
+#include "show/ShowTimer.h"
 
 #include <QDir>
 #include <QGuiApplication>
@@ -130,6 +132,44 @@ static void testModel()
     CHECK(again[0].toArray()[1].toObject()["i"].toBool());
 }
 
+static void testShowFeatures()
+{
+    // New fields survive a save/load round trip.
+    Presentation p = SongImporter::toPresentation(SongImporter::parseSongSelectText(kSongSelectTxt), 2, Presentation());
+    p.loop = true;
+    p.category = "Media";
+    p.slides[0].advanceMs = 8000;
+    p.slides[1].background = Background::media("/x/announce.mp4");
+    p.slides[1].background.audio = true;
+    const Presentation back = Presentation::fromJson(p.toJson());
+    CHECK(back.loop && back.isMediaCue());
+    CHECK(back.slides[0].advanceMs == 8000);
+    CHECK(back.slides[1].background.audio);
+
+    // Looping presentations wrap from the last slide to the first.
+    ShowController show;
+    show.take(p, int(p.slides.size()) - 1);
+    show.next();
+    CHECK(show.liveIndex() == 0);
+    p.loop = false;
+    show.take(p, int(p.slides.size()) - 1);
+    show.next();
+    CHECK(show.liveIndex() == int(p.slides.size()) - 1);
+
+    // Countdown text and token expansion.
+    ShowTimer *t = ShowTimer::instance();
+    t->countdown(65000);
+    CHECK(t->text() == "1:05");
+    CHECK(ShowTimer::expand("Starts in {timer}") == "Starts in 1:05");
+    t->countdown(3725000);
+    CHECK(t->text() == "1:02:05");
+    t->pause();
+    CHECK(!t->isRunning() && t->isSet());
+    t->reset();
+    CHECK(!t->isSet());
+    CHECK(!ShowTimer::hasTokens("plain"));
+}
+
 static QString makeBackground(const QString &dir)
 {
     QImage img(1920, 1080, QImage::Format_RGB32);
@@ -211,6 +251,7 @@ int main(int argc, char **argv)
     QDir().mkpath(out);
     testImporters();
     testModel();
+    testShowFeatures();
     testRender(out);
     std::printf("%s (%d failures), renders in %s\n", failures ? "FAILED" : "OK", failures, qPrintable(out));
     return failures ? 1 : 0;
