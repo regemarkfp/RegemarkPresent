@@ -13,6 +13,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QMenu;
 class QStackedWidget;
 class QTabWidget;
 class ShowController;
@@ -62,6 +63,13 @@ private:
     void addToCurrentPlaylist(const QString &presentationId);
     void createMediaCue(const QStringList &paths);
     void showCountdownSlide();
+    QString countdownPresentationId();
+    void advanceRundown();
+    int rundownInsertRow() const;
+    QMenu *addItemMenu();
+    QStringList pickFromLibrary(bool songs);
+    void addServiceSection(const QString &name);
+    void removeRundownRow();
     void newDeckPresentation();
     void showUnsaved(const Presentation &p);
     QListWidget *activeLibraryList() const;
@@ -94,6 +102,7 @@ private:
     Presentation m_view;            // in playing order (active arrangement)
     QList<int> m_viewMap;           // view slide -> m_current slide
     QComboBox *m_arrangementBox;
+    int m_pendingRundownRow = -1;   // row to select after the rundown reloads
     bool m_hasCurrent = false;
     int m_playlistRow = -1;
 

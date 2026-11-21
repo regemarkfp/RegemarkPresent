@@ -33,6 +33,8 @@ public:
 
 signals:
     void stateChanged();
+    // next() was asked for past the last slide of a non-looping item.
+    void reachedEnd();
 
 private:
     void publish();

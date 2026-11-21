@@ -23,6 +23,7 @@ void ShowController::next()
     if (!m_hasPres) return;
     if (m_index + 1 < m_pres.slides.size()) take(m_pres, m_index + 1);
     else if (m_pres.loop && !m_pres.slides.isEmpty()) take(m_pres, 0);
+    else emit reachedEnd();
 }
 
 void ShowController::previous()

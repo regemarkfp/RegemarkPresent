@@ -32,6 +32,7 @@ public:
 
 signals:
     void posterReady(const QString &path);
+    void videoFinished(const QString &path);   // a play-once video reached its end
 
 private:
     struct Video {

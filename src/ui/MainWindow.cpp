@@ -79,6 +79,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     connect(m_library, &Library::presentationsChanged, this, &MainWindow::refreshLibrary);
     connect(m_library, &Library::playlistsChanged, this, &MainWindow::refreshPlaylists);
     connect(m_show, &ShowController::stateChanged, this, &MainWindow::updateGridIcons);
+    // Automatic advances (timed slides, finished videos) that run past the end
+    // of an item carry on through the Pre-Service loop.
+    connect(m_show, &ShowController::reachedEnd, this, [this] {
+        const Playlist *p = m_library->playlist(m_playlistBox->currentData().toString());
+        if (p && m_playlistRow >= 0 && p->segmentAt(m_playlistRow) == "pre") advanceRundown();
+    });
+    connect(m_engine, &OutputEngine::liveVideoFinished, this, [this] { m_show->next(); });
     connect(m_media, &MediaBin::foldersChanged, this, [this](const QStringList &f) {
         m_settings.mediaFolders = f;
         m_settings.save();
@@ -243,10 +250,11 @@ void MainWindow::buildUi()
 
     auto *plL = new QVBoxLayout;
     auto *plTop = new QHBoxLayout;
-    plTop->addWidget(sectionLabel(tr("Playlist")));
+    plTop->addWidget(sectionLabel(tr("Rundown")));
     plTop->addStretch();
     auto *plNew = new QToolButton;
     plNew->setText(tr("New"));
+    plNew->setToolTip(tr("Start a new service rundown"));
     auto *plDel = new QToolButton;
     plDel->setText(tr("Delete"));
     plTop->addWidget(plNew);
@@ -257,15 +265,15 @@ void MainWindow::buildUi()
     m_playlist = new QListWidget;
     m_playlist->setObjectName("playlist");
     m_playlist->setDragDropMode(QAbstractItemView::InternalMove);
+    m_playlist->setContextMenuPolicy(Qt::CustomContextMenu);
     plL->addWidget(m_playlist, 1);
     auto *plBtns = new QHBoxLayout;
-    auto *plAdd = new QPushButton(tr("+ Add song"));
-    plAdd->setToolTip(tr("Add the selected library song (or double-click it)"));
-    auto *plHeader = new QPushButton(tr("+ Header"));
+    auto *plAdd = new QPushButton(tr("+ Add item"));
+    plAdd->setProperty("accent", true);
+    plAdd->setToolTip(tr("Add a song, presentation, media, scripture or countdown to the selected segment"));
     auto *plRemove = new QPushButton(tr("Remove"));
-    plBtns->addWidget(plAdd);
-    plBtns->addWidget(plHeader);
-    plBtns->addWidget(plRemove);
+    plBtns->addWidget(plAdd, 2);
+    plBtns->addWidget(plRemove, 1);
     plL->addLayout(plBtns);
     left->addWidget(panel(plL));
     left->setSizes({520, 420});
@@ -375,45 +383,49 @@ void MainWindow::buildUi()
     });
     connect(m_playlistBox, &QComboBox::currentIndexChanged, this, &MainWindow::refreshPlaylistItems);
     connect(plNew, &QToolButton::clicked, this, [this] {
-        const QString name = QInputDialog::getText(this, tr("New playlist"), tr("Name:"), QLineEdit::Normal,
-                                                   QLocale().toString(QDate::currentDate(), "d MMMM yyyy"));
+        const QString name = QInputDialog::getText(this, tr("New rundown"), tr("Name:"), QLineEdit::Normal,
+                                                   QLocale().toString(QDate::currentDate(), "dddd d MMMM"));
         if (name.isEmpty()) return;
-        Playlist p;
-        p.id = newId();
-        p.name = name;
+        const Playlist p = Playlist::create(name);
         m_library->savePlaylist(p);
         m_playlistBox->setCurrentIndex(m_playlistBox->findData(p.id));
     });
     connect(plDel, &QToolButton::clicked, this, [this] {
         Playlist *p = currentPlaylist();
-        if (p && QMessageBox::question(this, tr("Delete playlist"), tr("Delete \"%1\"?").arg(p->name)) == QMessageBox::Yes)
+        if (p && QMessageBox::question(this, tr("Delete rundown"), tr("Delete \"%1\"?").arg(p->name)) == QMessageBox::Yes)
             m_library->removePlaylist(p->id);
     });
-    connect(plAdd, &QPushButton::clicked, this, [this] {
-        Playlist *p = currentPlaylist();
-        QListWidgetItem *sel = activeLibraryList()->currentItem();
-        if (!p) {
-            QMessageBox::information(this, tr("Playlist"), tr("Create a playlist first."));
-            return;
+    connect(plAdd, &QPushButton::clicked, this, [this, plAdd] {
+        if (!currentPlaylist()) {
+            const Playlist p = Playlist::create(QLocale().toString(QDate::currentDate(), "dddd d MMMM"));
+            m_library->savePlaylist(p);
+            m_playlistBox->setCurrentIndex(m_playlistBox->findData(p.id));
         }
-        if (!sel) return;
-        p->items.append({sel->data(Qt::UserRole).toString(), QString()});
-        m_library->savePlaylist(*p);
+        addItemMenu()->exec(plAdd->mapToGlobal(QPoint(0, plAdd->height())));
     });
-    connect(plHeader, &QPushButton::clicked, this, [this] {
-        Playlist *p = currentPlaylist();
-        if (!p) return;
-        const QString h = QInputDialog::getText(this, tr("Header"), tr("Section header (e.g. Worship, Sermon):"));
-        if (h.isEmpty()) return;
-        p->items.append({QString(), h});
-        m_library->savePlaylist(*p);
-    });
-    connect(plRemove, &QPushButton::clicked, this, [this] {
-        Playlist *p = currentPlaylist();
-        const int row = m_playlist->currentRow();
-        if (!p || row < 0 || row >= p->items.size()) return;
-        p->items.removeAt(row);
-        m_library->savePlaylist(*p);
+    connect(plRemove, &QPushButton::clicked, this, &MainWindow::removeRundownRow);
+    connect(new QShortcut(QKeySequence::Delete, m_playlist, nullptr, nullptr, Qt::WidgetShortcut),
+            &QShortcut::activated, this, &MainWindow::removeRundownRow);
+    connect(m_playlist, &QListWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        QListWidgetItem *it = m_playlist->itemAt(pos);
+        QMenu menu;
+        menu.addMenu(addItemMenu())->setText(tr("Add here"));
+        if (it && it->data(Qt::UserRole + 2).toString() == "pre") {
+            menu.addAction(tr("Pre-Service: change slides every… (now %1 s)").arg(currentPlaylist()->preServiceAdvanceSec),
+                           this, [this] {
+                Playlist *p = currentPlaylist();
+                bool ok = false;
+                const int s = QInputDialog::getInt(this, tr("Pre-Service loop"),
+                                                   tr("Seconds per slide (videos play to the end):"),
+                                                   p->preServiceAdvanceSec, 2, 600, 1, &ok);
+                if (!ok) return;
+                p->preServiceAdvanceSec = s;
+                m_library->savePlaylist(*p);
+            });
+        }
+        if (it && it->data(Qt::UserRole + 2).toString().isEmpty())
+            menu.addAction(tr("Remove"), this, &MainWindow::removeRundownRow);
+        menu.exec(m_playlist->viewport()->mapToGlobal(pos));
     });
     connect(m_playlist->model(), &QAbstractItemModel::rowsMoved, this, [this] {
         Playlist *p = currentPlaylist();
@@ -421,8 +433,10 @@ void MainWindow::buildUi()
         p->items.clear();
         for (int i = 0; i < m_playlist->count(); ++i) {
             QListWidgetItem *it = m_playlist->item(i);
-            p->items.append({it->data(Qt::UserRole).toString(), it->data(Qt::UserRole + 1).toString()});
+            p->items.append({it->data(Qt::UserRole).toString(), it->data(Qt::UserRole + 1).toString(),
+                             it->data(Qt::UserRole + 2).toString()});
         }
+        p->normalize();   // an item dropped above Pre-Service still lands in a segment
         m_library->savePlaylist(*p);
     });
 
@@ -698,9 +712,20 @@ Playlist *MainWindow::currentPlaylist()
     return &m_playlistCache;
 }
 
+static QString itemGlyph(const Presentation *p)
+{
+    if (!p) return QStringLiteral("?");
+    if (p->category == QLatin1String("Song")) return QStringLiteral("♪");
+    if (p->category == QLatin1String("Media")) return QStringLiteral("▶");
+    if (p->category == QLatin1String("Scripture")) return QStringLiteral("✝");
+    if (p->category == QLatin1String("Countdown")) return QStringLiteral("⏱");
+    return QStringLiteral("▤");
+}
+
 void MainWindow::refreshPlaylistItems()
 {
-    const int row = m_playlist->currentRow();
+    const int row = m_pendingRundownRow >= 0 ? m_pendingRundownRow : m_playlist->currentRow();
+    m_pendingRundownRow = -1;
     m_playlist->clear();
     const Playlist *p = m_library->playlist(m_playlistBox->currentData().toString());
     if (!p) return;
@@ -708,19 +733,153 @@ void MainWindow::refreshPlaylistItems()
         auto *item = new QListWidgetItem;
         item->setData(Qt::UserRole, i.presentationId);
         item->setData(Qt::UserRole + 1, i.header);
-        if (i.presentationId.isEmpty()) {
-            item->setText(i.header.toUpper());
+        item->setData(Qt::UserRole + 2, i.segment);
+        QFont f = item->font();
+        if (i.isSegment()) {
+            // Fixed segments: bold bands that can't be dragged or removed.
+            QString text = i.header.toUpper();
+            if (i.segment == "pre") text += tr("   ⟳ loops");
+            item->setText(text);
             item->setForeground(Theme::accentHover);
-            QFont f = item->font();
+            item->setBackground(Theme::raised);
             f.setBold(true);
-            item->setFont(f);
+            item->setFlags((item->flags() | Qt::ItemIsDropEnabled) & ~Qt::ItemIsDragEnabled);
+        } else if (i.isSection()) {
+            item->setText(QStringLiteral("   ▸ ") + i.header);
+            item->setForeground(Theme::text);
+            f.setBold(true);
         } else {
             const Presentation *pres = m_library->find(i.presentationId);
-            item->setText(pres ? "   " + pres->title : tr("   (missing song)"));
+            item->setText(QStringLiteral("      %1  %2").arg(itemGlyph(pres), pres ? pres->title : tr("(missing item)")));
         }
+        item->setFont(f);
         m_playlist->addItem(item);
     }
     m_playlist->setCurrentRow(qMin(row, m_playlist->count() - 1));
+}
+
+int MainWindow::rundownInsertRow() const
+{
+    // Into the selected segment/section: after a selected item, or at the end
+    // of the selected header's block. Nothing selected: end of Service.
+    const Playlist *p = m_library->playlist(m_playlistBox->currentData().toString());
+    if (!p) return -1;
+    const int row = m_playlist->currentRow();
+    if (row < 0 || row >= p->items.size()) return p->segmentEnd("service");
+    if (p->items[row].isItem()) return row + 1;
+    int r = row + 1;
+    while (r < p->items.size() && p->items[r].isItem()) ++r;
+    return r;
+}
+
+QMenu *MainWindow::addItemMenu()
+{
+    auto *menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->addAction(tr("♪  Song…"), this, [this] {
+        for (const QString &id : pickFromLibrary(true)) addToCurrentPlaylist(id);
+    });
+    menu->addAction(tr("▤  Presentation…"), this, [this] {
+        for (const QString &id : pickFromLibrary(false)) addToCurrentPlaylist(id);
+    });
+    menu->addAction(tr("▶  Media (videos, photos)…"), this, [this] {
+        QStringList paths = m_media->selectedPaths();
+        if (paths.isEmpty())
+            paths = QFileDialog::getOpenFileNames(this, tr("Add media"), QString(),
+                tr("Photos and videos (*.jpg *.jpeg *.png *.webp *.bmp *.mp4 *.mov *.m4v *.mkv *.avi *.webm *.wmv)"));
+        createMediaCue(paths);
+    });
+    menu->addAction(tr("✝  Scripture…"), this, [this] {
+        const QString ref = QInputDialog::getText(this, tr("Scripture"), tr("Reference (e.g. John 3:16-18, Johannes 3:16):"));
+        if (ref.trimmed().isEmpty()) return;
+        if (!m_biblePanel->showReference(ref)) {
+            m_leftTabs->setCurrentIndex(2);   // the Bible tab shows why (no Bible, bad reference...)
+            return;
+        }
+        Presentation p = m_biblePanel->currentPresentation();
+        p.id = newId();
+        m_library->save(p);
+        addToCurrentPlaylist(p.id);
+    });
+    menu->addAction(tr("⏱  Countdown"), this, [this] { addToCurrentPlaylist(countdownPresentationId()); });
+    menu->addSeparator();
+    QMenu *section = menu->addMenu(tr("Service section"));
+    for (const QString &name : {tr("Welcoming"), tr("Worship"), tr("Announcements"), tr("Offering"), tr("Sermon"),
+                                tr("Baptism"), tr("Communion"), tr("Response"), tr("Prayer")})
+        section->addAction(name, this, [this, name] { addServiceSection(name); });
+    section->addSeparator();
+    section->addAction(tr("Other…"), this, [this] {
+        const QString name = QInputDialog::getText(this, tr("Service section"), tr("Name:"));
+        if (!name.trimmed().isEmpty()) addServiceSection(name.trimmed());
+    });
+    return menu;
+}
+
+QStringList MainWindow::pickFromLibrary(bool songs)
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle(songs ? tr("Add songs") : tr("Add presentations"));
+    dlg.resize(460, 560);
+    auto *layout = new QVBoxLayout(&dlg);
+    auto *search = new QLineEdit;
+    search->setPlaceholderText(songs ? tr("Search title, words, author or CCLI #") : tr("Search presentations"));
+    search->setClearButtonEnabled(true);
+    layout->addWidget(search);
+    auto *list = new QListWidget;
+    list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    layout->addWidget(list, 1);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Add"));
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(list, &QListWidget::itemDoubleClicked, &dlg, &QDialog::accept);
+
+    auto fill = [this, list, songs](const QString &q) {
+        list->clear();
+        for (const Presentation &p : m_library->presentations()) {
+            if ((p.category == QLatin1String("Song")) != songs) continue;
+            bool match = q.isEmpty() || p.title.contains(q, Qt::CaseInsensitive) || p.ccliNumber == q
+                         || p.author.contains(q, Qt::CaseInsensitive);
+            for (int i = 0; !match && i < p.slides.size(); ++i)
+                match = p.slides[i].mainText().contains(q, Qt::CaseInsensitive);
+            if (!match) continue;
+            auto *item = new QListWidgetItem(QStringLiteral("%1  %2").arg(itemGlyph(&p), p.title));
+            item->setData(Qt::UserRole, p.id);
+            list->addItem(item);
+        }
+        if (list->count()) list->setCurrentRow(0);
+    };
+    connect(search, &QLineEdit::textChanged, &dlg, fill);
+    fill(QString());
+    search->setFocus();
+    if (dlg.exec() != QDialog::Accepted) return {};
+    QStringList ids;
+    for (int i = 0; i < list->count(); ++i)   // keep list order
+        if (list->item(i)->isSelected()) ids << list->item(i)->data(Qt::UserRole).toString();
+    return ids;
+}
+
+void MainWindow::addServiceSection(const QString &name)
+{
+    Playlist *p = currentPlaylist();
+    if (!p) return;
+    // Sections only live in Service: inside it at the chosen spot, else at its end.
+    int at = rundownInsertRow();
+    if (p->segmentAt(qMax(0, at - 1)) != "service") at = p->segmentEnd("service");
+    p->items.insert(at, PlaylistItem::section(name));
+    m_pendingRundownRow = at;
+    m_library->savePlaylist(*p);
+}
+
+void MainWindow::removeRundownRow()
+{
+    Playlist *p = currentPlaylist();
+    const int row = m_playlist->currentRow();
+    if (!p || row < 0 || row >= p->items.size() || p->items[row].isSegment()) return;
+    p->items.removeAt(row);
+    m_pendingRundownRow = row - 1;
+    m_library->savePlaylist(*p);
 }
 
 // ---- Slide grid -----------------------------------------------------------
@@ -800,6 +959,17 @@ void MainWindow::refreshGrid()
     m_thumbs.clear();
     if (!m_hasCurrent) return;
     m_view = m_current.arranged(&m_viewMap);
+    // In Pre-Service everything keeps moving: slides without their own timing
+    // advance on the rundown's interval (play-once videos run to their end).
+    if (const Playlist *pl = m_library->playlist(m_playlistBox->currentData().toString());
+        pl && m_playlistRow >= 0 && pl->segmentAt(m_playlistRow) == "pre") {
+        for (int i = 0; i < m_view.slides.size(); ++i) {
+            Slide &s = m_view.slides[i];
+            const Background bg = m_view.effectiveBackground(i);
+            const bool playOnceVideo = bg.type == Background::Type::Video && !bg.loop;
+            if (s.advanceMs == 0 && !playOnceVideo) s.advanceMs = pl->preServiceAdvanceSec * 1000;
+        }
+    }
     for (int i = 0; i < m_view.slides.size(); ++i) {
         const Background bg = m_view.effectiveBackground(i);
         const QImage poster = bg.type == Background::Type::Image || bg.type == Background::Type::Video
@@ -889,16 +1059,27 @@ void MainWindow::goNext()
         m_show->next();
         return;
     }
-    // End of song: continue with the next song in the playlist.
-    if (m_playlistRow < 0) return;
-    for (int r = m_playlistRow + 1; r < m_playlist->count(); ++r) {
-        const QString id = m_playlist->item(r)->data(Qt::UserRole).toString();
-        if (id.isEmpty()) continue;
+    advanceRundown();
+}
+
+void MainWindow::advanceRundown()
+{
+    // End of an item: continue with the next one in the rundown. Pre-Service
+    // loops: after its last item it starts again at its first.
+    const Playlist *p = m_library->playlist(m_playlistBox->currentData().toString());
+    if (m_playlistRow < 0 || !p) return;
+    const bool pre = p->segmentAt(m_playlistRow) == "pre";
+    const int end = pre ? p->segmentEnd("pre") : int(p->items.size());
+    auto takeRow = [&](int r) {
         m_playlist->setCurrentRow(r);
-        showPresentation(id, r);
+        showPresentation(p->items[r].presentationId, r);
         if (!m_view.slides.isEmpty()) takeSlide(0);
-        return;
-    }
+    };
+    for (int r = m_playlistRow + 1; r < end; ++r)
+        if (p->items[r].isItem()) return takeRow(r);
+    if (pre)
+        for (int r = p->segmentRow("pre") + 1; r < end; ++r)
+            if (p->items[r].isItem()) return takeRow(r);
 }
 
 void MainWindow::goPrevious()
@@ -1128,8 +1309,10 @@ void MainWindow::applyMediaToPresentation(const QString &path)
 void MainWindow::addToCurrentPlaylist(const QString &presentationId)
 {
     Playlist *p = currentPlaylist();
-    if (!p) return;
-    p->items.append({presentationId, QString()});
+    if (!p || presentationId.isEmpty()) return;
+    const int at = qBound(0, rundownInsertRow(), int(p->items.size()));
+    p->items.insert(at, PlaylistItem::item(presentationId));
+    m_pendingRundownRow = at;   // keep adding after what was just added
     m_library->savePlaylist(*p);
 }
 
@@ -1194,7 +1377,7 @@ void MainWindow::createMediaCue(const QStringList &paths)
     statusBar()->showMessage(tr("Created media cue \"%1\"").arg(p.title), 5000);
 }
 
-void MainWindow::showCountdownSlide()
+QString MainWindow::countdownPresentationId()
 {
     QString id;
     for (const Presentation &p : m_library->presentations())
@@ -1210,6 +1393,12 @@ void MainWindow::showCountdownSlide()
         m_library->save(p);
         id = p.id;
     }
+    return id;
+}
+
+void MainWindow::showCountdownSlide()
+{
+    const QString id = countdownPresentationId();
     if (!ShowTimer::instance()->isSet()) {
         statusBar()->showMessage(tr("Start the timer first; the slide shows its countdown."), 6000);
     }

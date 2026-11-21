@@ -34,6 +34,7 @@ public:
 
 signals:
     void frameRendered(int screen);
+    void liveVideoFinished();   // the live background was a play-once video and it ended
 
 private:
     struct Screen {

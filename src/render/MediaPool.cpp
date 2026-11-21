@@ -80,6 +80,9 @@ MediaPool::Video *MediaPool::video(const Background &bg)
             emit posterReady(path);
         }
     });
+    connect(v->player, &QMediaPlayer::mediaStatusChanged, this, [this, path](QMediaPlayer::MediaStatus s) {
+        if (s == QMediaPlayer::EndOfMedia) emit videoFinished(path);
+    });
     v->player->setSource(QUrl::fromLocalFile(bg.path));
     v->player->play();
     m_videos.insert(bg.path, v);

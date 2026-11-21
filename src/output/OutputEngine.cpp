@@ -12,6 +12,10 @@ OutputEngine::OutputEngine(ShowController *show, QObject *parent)
     m_timer.setTimerType(Qt::PreciseTimer);
     connect(&m_timer, &QTimer::timeout, this, &OutputEngine::tick);
     connect(show, &ShowController::stateChanged, this, &OutputEngine::onStateChanged);
+    connect(&m_pool, &MediaPool::videoFinished, this, [this](const QString &path) {
+        if (m_lastBackground.type == Background::Type::Video && m_lastBackground.path == path && !m_lastBackground.loop)
+            emit liveVideoFinished();
+    });
     m_timer.start(4);
 }
 

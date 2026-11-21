@@ -2,6 +2,7 @@
 // for each screen role. Writes PNGs to the directory given as argv[1] so the
 // renders can be eyeballed. Run with QT_QPA_PLATFORM=offscreen.
 
+#include "core/Library.h"
 #include "core/RichText.h"
 #include "core/ScreenConfig.h"
 #include "import/DeckImporter.h"
@@ -269,6 +270,41 @@ static void testDeckImport(const QString &outDir)
     CHECK(fromPptx.slides.size() == 3);
 }
 
+static void testRundown()
+{
+    // New rundowns have the five fixed segments in order.
+    Playlist r = Playlist::create("Sunday");
+    QStringList keys;
+    for (const PlaylistItem &i : r.items) keys << i.segment;
+    CHECK(keys == Playlist::segmentKeys());
+
+    // Old playlists: loose items and headers land in Service, headers as sections.
+    Playlist old;
+    old.items = {PlaylistItem::section("Worship"), PlaylistItem::item("song-a"), PlaylistItem::item("song-b"),
+                 PlaylistItem::section("Sermon"), PlaylistItem::item("deck")};
+    old.normalize();
+    CHECK(old.items.size() == 10);
+    CHECK(old.segmentRow("service") == 2);
+    CHECK(old.items[3].isSection() && old.items[3].header == "Worship");
+    CHECK(old.segmentAt(4) == "service");
+    CHECK(old.segmentEnd("service") == 8);
+
+    // Items stay in their segment through save/load; sections outside Service are dropped.
+    Playlist p = Playlist::create("x");
+    p.items.insert(p.segmentEnd("pre"), PlaylistItem::item("loop-1"));
+    p.items.insert(p.segmentEnd("pre"), PlaylistItem::item("loop-2"));
+    p.items.insert(p.segmentEnd("outro"), PlaylistItem::section("Not allowed here"));
+    p.preServiceAdvanceSec = 12;
+    const Playlist back = Playlist::fromJson(p.toJson());
+    CHECK(back.segmentAt(1) == "pre" && back.items[1].presentationId == "loop-1");
+    CHECK(back.segmentAt(2) == "pre" && back.items[2].presentationId == "loop-2");
+    CHECK(back.segmentEnd("pre") == 3);
+    CHECK(back.preServiceAdvanceSec == 12);
+    bool strayHeader = false;
+    for (const PlaylistItem &i : back.items) strayHeader |= i.isSection();
+    CHECK(!strayHeader);
+}
+
 static QString makeBackground(const QString &dir)
 {
     QImage img(1920, 1080, QImage::Format_RGB32);
@@ -353,6 +389,7 @@ int main(int argc, char **argv)
     testShowFeatures();
     testDecksAndArrangements();
     testDeckImport(out);
+    testRundown();
     testRender(out);
     std::printf("%s (%d failures), renders in %s\n", failures ? "FAILED" : "OK", failures, qPrintable(out));
     return failures ? 1 : 0;

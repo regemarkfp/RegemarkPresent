@@ -20,13 +20,81 @@ static bool writeJson(const QString &path, const QJsonObject &o)
     return f.commit();
 }
 
+QStringList Playlist::segmentKeys()
+{
+    return {"pre", "intro", "service", "outro", "post"};
+}
+
+QString Playlist::segmentName(const QString &key)
+{
+    if (key == "pre") return QObject::tr("Pre-Service");
+    if (key == "intro") return QObject::tr("Intro");
+    if (key == "service") return QObject::tr("Service");
+    if (key == "outro") return QObject::tr("Outro");
+    if (key == "post") return QObject::tr("Post-Service");
+    return key;
+}
+
+void Playlist::normalize()
+{
+    QHash<QString, QList<PlaylistItem>> bySegment;
+    QString current = "service";   // rows before any segment (old playlists) belong to Service
+    for (const PlaylistItem &i : std::as_const(items)) {
+        if (i.isSegment() && segmentKeys().contains(i.segment)) current = i.segment;
+        else bySegment[current].append(i);
+    }
+    items.clear();
+    for (const QString &key : segmentKeys()) {
+        items.append({QString(), segmentName(key), key});
+        for (const PlaylistItem &i : bySegment.value(key)) {
+            // Sections only make sense inside Service; elsewhere drop the divider.
+            if (i.isSection() && key != "service") continue;
+            items.append(i);
+        }
+    }
+}
+
+QString Playlist::segmentAt(int row) const
+{
+    for (int r = qMin(row, int(items.size()) - 1); r >= 0; --r)
+        if (items[r].isSegment()) return items[r].segment;
+    return "service";
+}
+
+int Playlist::segmentRow(const QString &key) const
+{
+    for (int r = 0; r < items.size(); ++r)
+        if (items[r].segment == key) return r;
+    return -1;
+}
+
+int Playlist::segmentEnd(const QString &key) const
+{
+    int r = segmentRow(key);
+    if (r < 0) return int(items.size());
+    for (++r; r < items.size() && !items[r].isSegment(); ++r) {}
+    return r;
+}
+
+Playlist Playlist::create(const QString &name)
+{
+    Playlist p;
+    p.id = newId();
+    p.name = name;
+    p.normalize();
+    return p;
+}
+
 QJsonObject Playlist::toJson() const
 {
     QJsonArray a;
-    for (const PlaylistItem &i : items)
-        a.append(i.presentationId.isEmpty() ? QJsonObject{{"header", i.header}}
-                                            : QJsonObject{{"presentation", i.presentationId}});
-    return {{"format", "regemarkpresent.playlist"}, {"id", id}, {"name", name}, {"items", a}};
+    for (const PlaylistItem &i : items) {
+        if (i.isItem()) a.append(QJsonObject{{"presentation", i.presentationId}});
+        else if (i.isSegment()) a.append(QJsonObject{{"segment", i.segment}});
+        else a.append(QJsonObject{{"header", i.header}});
+    }
+    return {{"format", "regemarkpresent.playlist"}, {"id", id}, {"name", name}, {"items", a},
+            {"preServiceAdvance", preServiceAdvanceSec}};
 }
 
 Playlist Playlist::fromJson(const QJsonObject &o)
@@ -34,10 +102,13 @@ Playlist Playlist::fromJson(const QJsonObject &o)
     Playlist p;
     p.id = o["id"].toString(newId());
     p.name = o["name"].toString();
+    p.preServiceAdvanceSec = o["preServiceAdvance"].toInt(8);
     for (const QJsonValue &v : o["items"].toArray()) {
         const QJsonObject i = v.toObject();
-        p.items.append({i["presentation"].toString(), i["header"].toString()});
+        const QString seg = i["segment"].toString();
+        p.items.append({i["presentation"].toString(), seg.isEmpty() ? i["header"].toString() : segmentName(seg), seg});
     }
+    p.normalize();
     return p;
 }
 
