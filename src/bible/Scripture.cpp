@@ -136,7 +136,11 @@ Presentation toPresentation(const QList<Verse> &verses, const Bible &bible,
         main.id = newId();
         main.rect = opt.referenceBox ? QRectF(0.06, 0.07, 0.88, 0.76) : QRectF(0.06, 0.08, 0.88, 0.84);
         main.text = plain;
-        main.runs = QJsonArray{runs};
+        // One paragraph of runs. Not `QJsonArray{runs}`: MSVC treats that
+        // as a copy and GCC as nesting.
+        QJsonArray paragraphs;
+        paragraphs.append(runs);
+        main.runs = paragraphs;
         main.style = p.defaultStyle;
         slide.boxes.append(main);
 
