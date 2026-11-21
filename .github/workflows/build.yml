@@ -96,7 +96,9 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           arch: linux_gcc_64
-          modules: ${{ env.QT_MODULES }}
+          # qtserialport: the AppImage tool bundles WebEngine's positioning
+          # plugins, one of which (NMEA) links against it.
+          modules: ${{ env.QT_MODULES }} qtserialport
           cache: true
 
       - name: Configure
