@@ -125,4 +125,11 @@ if(RP_BUILD_TESTS)
     set_tests_properties(bibletest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
-install(TARGETS RegemarkPresent RUNTIME DESTINATION .)
+if(WIN32)
+    install(TARGETS RegemarkPresent RUNTIME DESTINATION .)
+else()
+    # Standard layout, used for the AppImage: bin/, a desktop entry and an icon.
+    install(TARGETS RegemarkPresent RUNTIME DESTINATION bin)
+    install(FILES resources/regemarkpresent.desktop DESTINATION share/applications)
+    install(FILES resources/icon_256.png DESTINATION share/icons/hicolor/256x256/apps RENAME regemarkpresent.png)
+endif()

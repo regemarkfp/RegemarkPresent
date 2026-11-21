@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Regemark Present
+GenericName=Church Presentation
+Comment=Songs, scripture and slides on screens, NDI and SDI
+Exec=RegemarkPresent %F
+Icon=regemarkpresent
+Terminal=false
+Categories=Office;Presentation;AudioVideo;
+MimeType=application/pdf;application/vnd.openxmlformats-officedocument.presentationml.presentation;

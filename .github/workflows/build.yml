@@ -1,0 +1,150 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+# Needed so tagged builds can create a GitHub release.
+permissions:
+  contents: write
+
+env:
+  QT_VERSION: "6.8.3"
+  QT_MODULES: qtmultimedia qtwebengine qtwebchannel qtpositioning qtpdf
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+
+      # The DeckLink SDK can't be redistributed in a public repo. Upload the
+      # SDK zip somewhere private and put its URL in the DECKLINK_SDK_URL
+      # repository secret; without it the build ships with DeckLink disabled.
+      - name: Fetch DeckLink SDK (optional)
+        shell: pwsh
+        env:
+          DECKLINK_SDK_URL: ${{ secrets.DECKLINK_SDK_URL }}
+        run: |
+          if ($env:DECKLINK_SDK_URL) {
+            Invoke-WebRequest $env:DECKLINK_SDK_URL -OutFile decklink.zip
+            Expand-Archive decklink.zip -DestinationPath decklink-sdk
+            $root = (Get-ChildItem decklink-sdk -Recurse -Filter DeckLinkAPI.idl | Select-Object -First 1).Directory.Parent.Parent.FullName
+            "DECKLINK_ARG=-DDECKLINK_SDK_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release %DECKLINK_ARG%
+        shell: cmd
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Self-test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Stage files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory deploy | Out-Null
+          Copy-Item build/RegemarkPresent.exe deploy/
+          windeployqt --release --no-translations --compiler-runtime deploy/RegemarkPresent.exe
+          Copy-Item README.md deploy/
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(RegemarkPresent VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\iscc.exe" /DAppVersion=$version installer\RegemarkPresent.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RegemarkPresent-Windows
+          path: dist/*.exe
+
+  linux:
+    # Built on the oldest supported Ubuntu so the AppImage runs on older glibc too.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgl1-mesa-dev libegl1 libfuse2 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 \
+            libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: linux_gcc_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Self-test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          EXTRA_QT_MODULES: "multimedia;pdf;webenginecore;webenginewidgets"
+          EXTRA_PLATFORM_PLUGINS: "libqwayland-egl.so;libqwayland-generic.so"
+        run: |
+          version=$(grep -oP 'project\(RegemarkPresent VERSION \K[0-9.]+' CMakeLists.txt)
+          DESTDIR=AppDir cmake --install build
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export LD_LIBRARY_PATH="$QT_ROOT_DIR/lib:$LD_LIBRARY_PATH"
+          export LINUXDEPLOY_OUTPUT_VERSION="$version"
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
+          mkdir -p dist
+          mv ./*-x86_64.AppImage "dist/RegemarkPresent-$version-x86_64.AppImage"
+
+      - name: Smoke-test the AppImage
+        run: QT_QPA_PLATFORM=offscreen dist/*.AppImage --appimage-extract-and-run --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RegemarkPresent-Linux
+          path: dist/*.AppImage
+
+  # One job publishes both downloads, so the two builds never race to create the release.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
