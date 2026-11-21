@@ -115,7 +115,13 @@ static void testModel()
 
     // Rich text: emphasis survives a round trip through a document.
     TextStyle base;
-    QJsonArray runs{QJsonArray{QJsonObject{{"t", "Hello "}}, QJsonObject{{"t", "world"}, {"c", "#ffffd700"}, {"i", true}}}};
+    // Built explicitly: `QJsonArray{QJsonArray{...}}` copies on some
+    // compilers and nests on others.
+    QJsonArray paragraph;
+    paragraph.append(QJsonObject{{"t", "Hello "}});
+    paragraph.append(QJsonObject{{"t", "world"}, {"c", "#ffffd700"}, {"i", true}});
+    QJsonArray runs;
+    runs.append(paragraph);
     QTextDocument doc;
     RichText::toDocument(&doc, QString(), runs, base, 0.5);
     const QJsonArray again = RichText::fromDocument(&doc, base, 0.5);
