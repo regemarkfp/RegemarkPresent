@@ -28,18 +28,28 @@ struct BibleInfo {
     QString name;
     QString language;    // as written in the file, e.g. "ENG"
     QString identifier;
-    QString rights;
+    QString rights;      // Zefania <rights>, Beblia status ("Public Domain", "© ...")
     QString description;
+    QString link;        // Beblia link attribute
+    bool beblia = false; // <bible><testament><book number> layout rather than Zefania
 };
 
-// One translation loaded from a Zefania XML file into memory (a full Bible
-// is ~31k verses, a few MB of text).
+// One translation loaded into memory from a Zefania XML or Beblia XML file
+// (a full Bible is ~31k verses, a few MB of text).
 class Bible {
 public:
     bool load(const QString &path, QString *error = nullptr);
     bool load(QIODevice *device, QString *error = nullptr);
-    // Reads only <XMLBIBLE>/<INFORMATION>, stopping at the first book.
+    // Reads only the root element and <INFORMATION>, stopping at the first book.
     static bool readInfo(const QString &path, BibleInfo *info, QString *error = nullptr);
+
+    // Beblia files carry no language; it is in the file name:
+    // "Afrikaans1983Bible.xml" -> ("Afrikaans", "1983"), "NorthernSothoBible.xml"
+    // -> ("Northern Sotho", ""), "AmharicDawroDFBEBible.xml" -> ("Amharic", "Dawro DFBE").
+    static bool bebliaName(const QString &fileName, QString *language, QString *version = nullptr);
+
+    // For files whose language comes from outside (catalog, library index).
+    void setLanguage(const QString &language) { m_info.language = language; }
 
     bool isEmpty() const { return m_books.isEmpty(); }
     QString name() const { return m_info.name; }
@@ -47,9 +57,12 @@ public:
     QString identifier() const { return m_info.identifier; }
     QString rights() const { return m_info.rights; }
     const BibleInfo &info() const { return m_info; }
-    // Short tag for slides ("KJV"); derived from the identifier.
+    // Short tag for slides ("KJV", "AFR83"); from the identifier or Beblia translation name.
     QString abbreviation() const;
     static QString abbreviationFor(const QString &identifier, const QString &name);
+    static QString abbreviationOf(const BibleInfo &info);
+    // "Afrikaans","1983" -> "AFR83"; "English","KJ" -> "KJV"; "Afrikaans","NLV" -> "NLV".
+    static QString bebliaAbbreviation(const QString &language, const QString &version);
 
     QList<BookInfo> books() const;
     bool hasBook(int book) const { return m_books.contains(book); }

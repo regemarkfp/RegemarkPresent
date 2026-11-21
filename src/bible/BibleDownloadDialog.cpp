@@ -2,8 +2,9 @@
 
 #include "bible/BibleLibrary.h"
 #include "bible/BookNames.h"
-#include "bible/ZefaniaCatalog.h"
+#include "bible/BibleCatalog.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
@@ -21,10 +22,10 @@
 static const char *const kFeatured = "*featured";  // English + Afrikaans
 static const char *const kAll = "*all";
 
-enum Column { ColName, ColLanguage, ColDate, ColSize, ColStatus, ColCount };
+enum Column { ColName, ColLanguage, ColSource, ColSize, ColStatus, ColCount };
 
 BibleDownloadDialog::BibleDownloadDialog(BibleLibrary *library, QWidget *parent)
-    : QDialog(parent), m_library(library), m_catalog(new ZefaniaCatalog(library, this))
+    : QDialog(parent), m_library(library), m_catalog(new BibleCatalog(library, this))
 {
     setWindowTitle(tr("Get Bibles"));
     resize(820, 560);
@@ -43,7 +44,7 @@ BibleDownloadDialog::BibleDownloadDialog(BibleLibrary *library, QWidget *parent)
     filters->addWidget(m_refresh);
 
     m_table = new QTableWidget(0, ColCount);
-    m_table->setHorizontalHeaderLabels({tr("Translation"), tr("Language"), tr("Date"), tr("Size"), tr("Status")});
+    m_table->setHorizontalHeaderLabels({tr("Translation"), tr("Language"), tr("Source"), tr("Size"), tr("Status")});
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -65,16 +66,24 @@ BibleDownloadDialog::BibleDownloadDialog(BibleLibrary *library, QWidget *parent)
     m_cancel = new QPushButton(tr("Cancel download"));
     m_cancel->hide();
 
+    // Most modern translations are copyrighted: anything not obviously public
+    // domain needs the user to confirm their church may use it.
+    m_confirm = new QCheckBox(tr("Our church may use this translation (it is public domain, or we have "
+                                 "permission or a licence)"));
+    m_confirm->hide();
+    connect(m_confirm, &QCheckBox::toggled, this, &BibleDownloadDialog::updateButtons);
+
     auto *actions = new QHBoxLayout;
     actions->addWidget(m_status, 1);
     actions->addWidget(m_progress, 1);
     actions->addWidget(m_cancel);
     actions->addWidget(m_download);
 
-    auto *note = new QLabel(tr("Translations come from the <a href=\"https://github.com/%1\">Zefania XML</a> "
-                               "project. Many modern translations are copyrighted: you are responsible for "
-                               "having the right to display a translation in your services.")
-                                .arg(QLatin1String(ZefaniaCatalog::kRepo)));
+    auto *note = new QLabel(tr("Translations come from the <a href=\"https://github.com/%1\">Beblia</a> and "
+                               "<a href=\"https://github.com/%2\">Zefania XML</a> projects. Many modern "
+                               "translations are copyrighted: you are responsible for having the right to "
+                               "display a translation in your services.")
+                                .arg(QLatin1String(BibleCatalog::kBebliaRepo), QLatin1String(BibleCatalog::kZefaniaRepo)));
     note->setWordWrap(true);
     note->setOpenExternalLinks(true);
     note->setForegroundRole(QPalette::PlaceholderText);
@@ -85,6 +94,7 @@ BibleDownloadDialog::BibleDownloadDialog(BibleLibrary *library, QWidget *parent)
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(filters);
     layout->addWidget(m_table, 1);
+    layout->addWidget(m_confirm);
     layout->addLayout(actions);
     layout->addWidget(note);
     layout->addWidget(close);
@@ -94,25 +104,25 @@ BibleDownloadDialog::BibleDownloadDialog(BibleLibrary *library, QWidget *parent)
     connect(m_table, &QTableWidget::itemSelectionChanged, this, &BibleDownloadDialog::updateButtons);
     connect(m_table, &QTableWidget::cellDoubleClicked, this, &BibleDownloadDialog::startDownload);
     connect(m_download, &QPushButton::clicked, this, &BibleDownloadDialog::startDownload);
-    connect(m_cancel, &QPushButton::clicked, m_catalog, &ZefaniaCatalog::cancelDownload);
+    connect(m_cancel, &QPushButton::clicked, m_catalog, &BibleCatalog::cancelDownload);
     connect(m_refresh, &QPushButton::clicked, this, [this] {
         setStatus(tr("Fetching the list…"));
         m_refresh->setEnabled(false);
         m_catalog->refresh(true);
     });
 
-    connect(m_catalog, &ZefaniaCatalog::catalogReady, this, [this] {
+    connect(m_catalog, &BibleCatalog::catalogReady, this, [this] {
         m_refresh->setEnabled(true);
         setStatus(tr("%n translation(s) available.", nullptr, int(m_catalog->entries().size())));
         populateLanguages();
         refilter();
     });
-    connect(m_catalog, &ZefaniaCatalog::notice, this, [this](const QString &msg) { setStatus(msg); });
-    connect(m_catalog, &ZefaniaCatalog::catalogError, this, [this](const QString &msg) {
+    connect(m_catalog, &BibleCatalog::notice, this, [this](const QString &msg) { setStatus(msg); });
+    connect(m_catalog, &BibleCatalog::catalogError, this, [this](const QString &msg) {
         m_refresh->setEnabled(true);
         setStatus(msg, true);
     });
-    connect(m_catalog, &ZefaniaCatalog::downloadProgress, this, [this](qint64 received, qint64 total) {
+    connect(m_catalog, &BibleCatalog::downloadProgress, this, [this](qint64 received, qint64 total) {
         m_progress->setRange(0, total > 0 ? 1000 : 0);
         if (total > 0) m_progress->setValue(int(received * 1000 / total));
         m_progress->setFormat(QLocale().formattedDataSize(received));
@@ -123,12 +133,12 @@ BibleDownloadDialog::BibleDownloadDialog(BibleLibrary *library, QWidget *parent)
         m_status->show();
         refilter();
     };
-    connect(m_catalog, &ZefaniaCatalog::downloadFinished, this, [this, finish](const QString &id) {
+    connect(m_catalog, &BibleCatalog::downloadFinished, this, [this, finish](const QString &id) {
         finish();
         setStatus(tr("Installed %1.").arg(m_library->entry(id).name));
         emit bibleInstalled(id);
     });
-    connect(m_catalog, &ZefaniaCatalog::downloadFailed, this, [this, finish](const QString &msg) {
+    connect(m_catalog, &BibleCatalog::downloadFailed, this, [this, finish](const QString &msg) {
         finish();
         setStatus(msg, true);
     });
@@ -179,7 +189,8 @@ void BibleDownloadDialog::refilter()
             continue;
         }
         if (!needle.isEmpty()) {
-            const QString hay = BookNames::stripDiacritics(e.name + ' ' + e.module + ' ' + e.language).toLower();
+            const QString hay = BookNames::stripDiacritics(e.name + ' ' + e.module + ' ' + e.language + ' '
+                                                           + e.path + ' ' + e.sourceName()).toLower();
             if (!hay.contains(needle)) continue;
         }
         const bool installed = m_catalog->isInstalled(e);
@@ -188,12 +199,14 @@ void BibleDownloadDialog::refilter()
         m_table->insertRow(row);
         auto *name = new QTableWidgetItem(e.name);
         name->setData(Qt::UserRole, i);
-        name->setToolTip(QStringLiteral("%1\n%2").arg(e.module, e.path));
+        name->setToolTip(e.date.isEmpty() ? e.path : QStringLiteral("%1\n%2").arg(e.path, e.date));
         m_table->setItem(row, ColName, name);
         m_table->setItem(row, ColLanguage, new QTableWidgetItem(e.language));
-        m_table->setItem(row, ColDate, new QTableWidgetItem(e.date));
+        m_table->setItem(row, ColSource, new QTableWidgetItem(e.sourceName()));
         m_table->setItem(row, ColSize, new QTableWidgetItem(e.size > 0 ? QLocale().formattedDataSize(e.size) : QString()));
-        m_table->setItem(row, ColStatus, new QTableWidgetItem(busy ? tr("Downloading…") : installed ? tr("Installed") : QString()));
+        m_table->setItem(row, ColStatus, new QTableWidgetItem(busy ? tr("Downloading…")
+                                                              : installed ? tr("Installed")
+                                                              : e.publicDomain ? tr("Public domain") : QString()));
         if (e.path == selectedPath) m_table->selectRow(row);
     }
     updateButtons();
@@ -211,7 +224,15 @@ void BibleDownloadDialog::updateButtons()
 {
     const int i = currentEntry();
     const bool busy = m_catalog->isDownloading();
-    m_download->setEnabled(i >= 0 && !busy);
+    const CatalogEntry e = i >= 0 ? m_catalog->entries()[i] : CatalogEntry();
+    if (e.path != m_confirmFor) {  // the confirmation is per translation
+        m_confirmFor = e.path;
+        const QSignalBlocker block(m_confirm);
+        m_confirm->setChecked(false);
+    }
+    const bool needsConfirm = i >= 0 && !e.publicDomain;
+    m_confirm->setVisible(needsConfirm);
+    m_download->setEnabled(i >= 0 && !busy && (!needsConfirm || m_confirm->isChecked()));
     m_download->setText(i >= 0 && m_catalog->isInstalled(m_catalog->entries()[i]) ? tr("Reinstall") : tr("Download"));
 }
 
@@ -220,6 +241,10 @@ void BibleDownloadDialog::startDownload()
     const int i = currentEntry();
     if (i < 0 || m_catalog->isDownloading()) return;
     const CatalogEntry e = m_catalog->entries()[i];
+    if (!e.publicDomain && !m_confirm->isChecked()) {
+        setStatus(tr("Tick the box to confirm your church may use %1.").arg(e.name), true);
+        return;
+    }
     if (!m_catalog->download(e)) return;
     m_status->hide();
     m_progress->setRange(0, 0);

@@ -1,4 +1,4 @@
-// Headless Bible tests: Zefania loading and text cleanup, reference parsing
+// Headless Bible tests: Zefania and Beblia loading and text cleanup, reference parsing
 // (English + Afrikaans), slide packing, catalog path parsing and the panel.
 // No network access. Run with QT_QPA_PLATFORM=offscreen.
 
@@ -8,7 +8,7 @@
 #include "bible/BookNames.h"
 #include "bible/Reference.h"
 #include "bible/Scripture.h"
-#include "bible/ZefaniaCatalog.h"
+#include "bible/BibleCatalog.h"
 #include "core/RichText.h"
 
 #include <QApplication>
@@ -380,7 +380,7 @@ static void testScripture(const QTemporaryDir &dir)
 static void testCatalogPaths()
 {
     CatalogEntry e;
-    CHECK(ZefaniaCatalog::parsePath("Bibles/ENG/King James/KJV+/SF_2009-01-20_ENG_KJV_(KJV+).xml", &e));
+    CHECK(BibleCatalog::parseZefaniaPath("Bibles/ENG/King James/KJV+/SF_2009-01-20_ENG_KJV_(KJV+).xml", &e));
     CHECK_EQ(e.languageCode, QString("ENG"));
     CHECK_EQ(e.language, QString("English"));
     CHECK_EQ(e.module, QString("KJV"));
@@ -390,7 +390,7 @@ static void testCatalogPaths()
              QString("https://raw.githubusercontent.com/kohelet-net-admin/zefania-xml-bibles/master/"
                      "Bibles/ENG/King%20James/KJV%2B/SF_2009-01-20_ENG_KJV_%28KJV%2B%29.xml"));
 
-    CHECK(ZefaniaCatalog::parsePath(
+    CHECK(BibleCatalog::parseZefaniaPath(
         "Bibles/AFR/1933/1953 Afrikaans Bybel/SF_2009-01-20_AFR_AFR3353_(1933_1953 AFRIKAANS BYBEL).xml", &e));
     CHECK_EQ(e.languageCode, QString("AFR"));
     CHECK_EQ(e.language, QString("Afrikaans"));
@@ -398,36 +398,36 @@ static void testCatalogPaths()
     CHECK_EQ(e.name, QString("1933/1953 Afrikaans Bybel"));
     CHECK_EQ(e.installId(), QString("afr-afr3353-1933-1953-afrikaans-bybel"));
 
-    CHECK(ZefaniaCatalog::parsePath("Bibles/ENG/World English Bible/SF_2009-01-20_ENG_WEB_(WORLD ENGLISH BIBLE).xml", &e));
+    CHECK(BibleCatalog::parseZefaniaPath("Bibles/ENG/World English Bible/SF_2009-01-20_ENG_WEB_(WORLD ENGLISH BIBLE).xml", &e));
     CHECK_EQ(e.name, QString("World English Bible"));
-    CHECK(ZefaniaCatalog::parsePath("Bibles/ENG/x/SF_2009-01-20_ENG_ISV_(ISV NT).xml", &e));
+    CHECK(BibleCatalog::parseZefaniaPath("Bibles/ENG/x/SF_2009-01-20_ENG_ISV_(ISV NT).xml", &e));
     CHECK_EQ(e.name, QString("ISV NT"));
-    CHECK(ZefaniaCatalog::parsePath(
+    CHECK(BibleCatalog::parseZefaniaPath(
         "Bibles/GER/Lutherbibel/Luther 1545 (Letzte Hand)/SF_2012-08-14_DEUTSCH_LUT_1545_LH_(LUTHER 1545 (LETZTE HAND)).xml", &e));
     CHECK_EQ(e.languageCode, QString("GER"));
     CHECK_EQ(e.module, QString("LUT_1545_LH"));
     CHECK_EQ(e.name, QString("Luther 1545 (Letzte Hand)"));
-    CHECK(ZefaniaCatalog::parsePath(
+    CHECK(BibleCatalog::parseZefaniaPath(
         "Bibles/TUR/Southern Azeri Translation/SF_2012-01-07_AZB_AZERI_(DESCRIPTION_EN=SOUTHERN AZERI TRANSLATION).xml", &e));
     CHECK_EQ(e.languageCode, QString("AZB"));
     CHECK_EQ(e.name, QString("Southern Azeri Translation"));
-    CHECK(ZefaniaCatalog::parsePath(
+    CHECK(BibleCatalog::parseZefaniaPath(
         "Bibles/ENG/Galatians/SF_25.04.2004_ENG_MARCGAL_(THE EPISTLE TO THE GALATIANS(DETERING)).xml", &e));
     CHECK_EQ(e.date, QString("2004-04-25"));
-    CHECK(ZefaniaCatalog::parsePath("Bibles/NL/Dutch Statenvertaling/SF_2009-01-20_NL_DUTV_(DUTCH STATENVERTALING).xml", &e));
+    CHECK(BibleCatalog::parseZefaniaPath("Bibles/NL/Dutch Statenvertaling/SF_2009-01-20_NL_DUTV_(DUTCH STATENVERTALING).xml", &e));
     CHECK_EQ(e.language, QString("Dutch"));
-    CHECK(ZefaniaCatalog::parsePath("Bibles/CZE/Czech BKR/Czech BKR/sf_czech_bkr.xml", &e));
+    CHECK(BibleCatalog::parseZefaniaPath("Bibles/CZE/Czech BKR/Czech BKR/sf_czech_bkr.xml", &e));
     CHECK_EQ(e.languageCode, QString("CZE"));
     CHECK_EQ(e.name, QString("Czech BKR"));
-    CHECK(ZefaniaCatalog::parsePath(
+    CHECK(BibleCatalog::parseZefaniaPath(
         "Bibles/CEB/Cebuano/SF_2009-01-20_CEB_CEB-B_(CEBUANO ANG BIBLIA (BUGNA VERSION)).xml", &e));
     CHECK_EQ(e.name, QString("Cebuano Ang Biblia (Bugna Version)"));
 
-    CHECK(!ZefaniaCatalog::parsePath("Dictionaries/GER/x/SF_2006-01-24_GER_RIEG_(X).xml", &e));
-    CHECK(!ZefaniaCatalog::parsePath("Bibles/index.csv", &e));
-    CHECK(!ZefaniaCatalog::parsePath("README.md", &e));
-    CHECK_EQ(ZefaniaCatalog::languageName("xho"), QString("Xhosa"));
-    CHECK_EQ(ZefaniaCatalog::languageName("QQQ"), QString("QQQ"));
+    CHECK(!BibleCatalog::parseZefaniaPath("Dictionaries/GER/x/SF_2006-01-24_GER_RIEG_(X).xml", &e));
+    CHECK(!BibleCatalog::parseZefaniaPath("Bibles/index.csv", &e));
+    CHECK(!BibleCatalog::parseZefaniaPath("README.md", &e));
+    CHECK_EQ(BibleCatalog::languageName("xho"), QString("Xhosa"));
+    CHECK_EQ(BibleCatalog::languageName("QQQ"), QString("QQQ"));
 }
 
 static void testLibraryAndPanel(const QTemporaryDir &dir)
@@ -484,6 +484,137 @@ static void testLibraryAndPanel(const QTemporaryDir &dir)
     CHECK_EQ(shown, 0);
 }
 
+// Beblia layout: <bible translation status link><testament><book number><chapter number><verse number>.
+static const char *kBebliaXml = R"(<?xml version="1.0" encoding="UTF-8"?>
+<bible translation="Afrikaans 1983" status="© Bybelgenootskap van Suid-Afrika 1983. Gebruik met toestemming." link="https://example.org/afr83">
+	<testament name="Old">
+		<book number="19">
+			<chapter number="23">
+				<verse number="1">Die Here is my herder, ek kom niks kort nie.</verse>
+				<verse number="2">Hy laat my  rus
+				  in groen weivelde &amp; lei my na waters waar daar vrede is.</verse>
+			</chapter>
+		</book>
+	</testament>
+	<testament name="New">
+		<book number="43">
+			<chapter number="3">
+				<verse number="16">Want so lief het God die wêreld gehad dat Hy sy enigste Seun gegee het.</verse>
+				<verse number="17"></verse>
+			</chapter>
+		</book>
+	</testament>
+	<book number="65"><chapter number="1"><verse number="3">Geliefdes, ek was gretig.</verse></chapter></book>
+</bible>
+)";
+
+static void testBeblia(const QTemporaryDir &dir)
+{
+    Bible b;
+    QString error;
+    CHECK(b.load(writeFile(dir, "Afrikaans1983Bible.xml", kBebliaXml), &error));
+    CHECK(error.isEmpty());
+    CHECK(b.info().beblia);
+    CHECK_EQ(b.name(), QString("Afrikaans 1983"));
+    CHECK_EQ(b.language(), QString("Afrikaans"));       // from the file name
+    CHECK(b.rights().startsWith(QString::fromUtf8("© Bybelgenootskap")));
+    CHECK_EQ(b.info().link, QString("https://example.org/afr83"));
+    CHECK_EQ(b.abbreviation(), QString("AFR83"));
+    CHECK_EQ(int(b.books().size()), 3);
+    CHECK_EQ(b.bookName(43), QString("Johannes"));
+    CHECK_EQ(b.books().value(1).name, QString("Johannes"));
+    CHECK_EQ(b.totalVerses(), 4);                       // the empty verse is dropped
+    CHECK_EQ(b.verse(19, 23, 2).text, QString("Hy laat my rus in groen weivelde & lei my na waters waar daar vrede is."));
+    const Reference r = Reference::parse("Joh 3:16", &b);
+    CHECK_EQ(r.format(&b), QString("Johannes 3:16"));
+    CHECK(b.range(r).value(0).text.startsWith(QString::fromUtf8("Want so lief het God die wêreld")));
+    CHECK_EQ(int(b.range(Reference::parse("Judas 3", &b)).size()), 1);
+
+    BibleInfo info;
+    CHECK(Bible::readInfo(dir.filePath("Afrikaans1983Bible.xml"), &info));
+    CHECK(info.beblia && info.name == "Afrikaans 1983" && info.language == "Afrikaans");
+
+    // Same content under a name that says nothing: English names until told otherwise.
+    Bible anon;
+    CHECK(anon.load(writeFile(dir, "download.xml", kBebliaXml)));
+    CHECK(anon.language().isEmpty());
+    CHECK_EQ(anon.bookName(43), QString("John"));
+    anon.setLanguage("AFR");
+    CHECK_EQ(anon.bookName(43), QString("Johannes"));
+    CHECK_EQ(anon.books().value(1).name, QString("Johannes"));
+
+    // Library: a catalog download arrives under a temp name with a language hint.
+    BibleLibrary lib(dir.filePath("beblia-lib"));
+    BibleEntry hint;
+    hint.id = "beblia-afrikaans1983";
+    hint.languageCode = "AFR";
+    const QString id = lib.importFile(dir.filePath("download.xml"), &error, hint);
+    CHECK_EQ(id, QString("beblia-afrikaans1983"));
+    CHECK_EQ(lib.entry(id).name, QString("Afrikaans 1983"));
+    CHECK_EQ(lib.entry(id).language, QString("Afrikaans"));
+    CHECK_EQ(lib.entry(id).abbreviation, QString("AFR83"));
+    BibleLibrary again(dir.filePath("beblia-lib"));    // fresh load from disk keeps the language
+    const auto loaded = again.load(id);
+    CHECK(loaded && loaded->bookName(43) == "Johannes");
+    // A Beblia file imported from disk under its own name.
+    const QString own = lib.importFile(dir.filePath("Afrikaans1983Bible.xml"), &error);
+    CHECK(!own.isEmpty() && lib.entry(own).languageCode == "AFR");
+}
+
+struct NameCase { const char *file, *language, *version; };
+
+static void testBebliaNames()
+{
+    const NameCase cases[] = {
+        {"Afrikaans1983Bible.xml", "Afrikaans", "1983"},
+        {"AfrikaansNLVBible.xml", "Afrikaans", "NLV"},
+        {"AfrikaansBible.xml", "Afrikaans", ""},
+        {"EnglishKJBible.xml", "English", "KJ"},
+        {"EnglishNIVBible.xml", "English", "NIV"},
+        {"NorthernSothoBible.xml", "Northern Sotho", ""},
+        {"AmharicDawroDFBEBible.xml", "Amharic", "Dawro DFBE"},
+        {"Albanian1872Bible.xml", "Albanian", "1872"},
+        {"EnglishAmplifiedBible.xml", "English", "Amplified"},
+    };
+    for (const NameCase &c : cases) {
+        QString lang, ver;
+        CHECK(Bible::bebliaName(c.file, &lang, &ver));
+        if (lang != c.language || ver != c.version) {
+            std::fprintf(stderr, "FAIL bebliaName(%s) -> '%s' / '%s'\n", c.file, qPrintable(lang), qPrintable(ver));
+            ++failures;
+        }
+    }
+
+    CatalogEntry e;
+    CHECK(BibleCatalog::parseBebliaPath("Afrikaans1983Bible.xml", &e));
+    CHECK(e.source == CatalogEntry::Source::Beblia);
+    CHECK_EQ(e.sourceName(), QString("Beblia"));
+    CHECK_EQ(e.languageCode, QString("AFR"));
+    CHECK_EQ(e.language, QString("Afrikaans"));
+    CHECK_EQ(e.name, QString("Afrikaans 1983"));
+    CHECK_EQ(e.abbreviation(), QString("AFR83"));
+    CHECK_EQ(e.installId(), QString("beblia-afrikaans1983"));
+    CHECK(!e.publicDomain);
+    CHECK_EQ(e.downloadUrl().toString(QUrl::FullyEncoded),
+             QString("https://raw.githubusercontent.com/Beblia/Holy-Bible-XML-Format/master/Afrikaans1983Bible.xml"));
+    CHECK(BibleCatalog::parseBebliaPath("EnglishKJBible.xml", &e));
+    CHECK(e.publicDomain && e.languageCode == "ENG" && e.abbreviation() == "KJV");
+    CHECK(BibleCatalog::parseBebliaPath("EnglishNIVBible.xml", &e) && !e.publicDomain);
+    CHECK(BibleCatalog::parseBebliaPath("Albanian1872Bible.xml", &e) && e.publicDomain);
+    CHECK(BibleCatalog::parseBebliaPath("AfrikaansNLVBible.xml", &e) && e.abbreviation() == "NLV");
+    CHECK(BibleCatalog::parseBebliaPath("NorthernSothoBible.xml", &e) && e.name == "Northern Sotho");
+    CHECK(!BibleCatalog::parseBebliaPath("README.md", &e));
+    CHECK(!BibleCatalog::parseBebliaPath(".gitattributes", &e));
+    CHECK(!BibleCatalog::parseBebliaPath("sub/EnglishKJBible.xml", &e));
+
+    CHECK(BibleCatalog::parseZefaniaPath("Bibles/ENG/x/SF_2009-01-20_ENG_ASV_(AMERICAN STANDARD VERSION).xml", &e));
+    CHECK(e.source == CatalogEntry::Source::Zefania && e.publicDomain);
+    CHECK_EQ(BibleCatalog::languageCode("Afrikaans"), QString("AFR"));
+    CHECK_EQ(BibleCatalog::languageCode("German"), QString("GER"));
+    CHECK_EQ(BibleCatalog::languageCode("Northern Sotho"), QString("Northern Sotho"));
+    CHECK_EQ(BibleCatalog::languageName("Northern Sotho", "Northern Sotho"), QString("Northern Sotho"));
+}
+
 int main(int argc, char **argv)
 {
     QStandardPaths::setTestModeEnabled(true);  // QSettings/AppData go to a scratch location
@@ -496,6 +627,8 @@ int main(int argc, char **argv)
     testReferences();
     testScripture(dir);
     testCatalogPaths();
+    testBeblia(dir);
+    testBebliaNames();
     testLibraryAndPanel(dir);
     std::printf("%s (%d failures)\n", failures ? "FAILED" : "OK", failures);
     return failures ? 1 : 0;

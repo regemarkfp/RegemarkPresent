@@ -32,9 +32,9 @@ BiblePanel::BiblePanel(BibleLibrary *library, QWidget *parent)
     m_translation->setMinimumContentsLength(12);
     m_translation->setToolTip(tr("Translation"));
     m_getBibles = new QPushButton(tr("Get Bibles…"));
-    m_getBibles->setToolTip(tr("Download translations from the online Zefania XML library"));
+    m_getBibles->setToolTip(tr("Download translations from the online Beblia and Zefania XML libraries"));
     m_import = new QPushButton(tr("Import XML…"));
-    m_import->setToolTip(tr("Install a Zefania XML Bible file from disk"));
+    m_import->setToolTip(tr("Install a Bible XML file (Beblia or Zefania format) from disk"));
     auto *top = new QHBoxLayout;
     top->addWidget(m_translation, 1);
     top->addWidget(m_getBibles);
@@ -197,6 +197,10 @@ void BiblePanel::onTranslationChanged()
         return;
     }
 
+    // Copyright/status line (Beblia "status", Zefania <rights>) for the operator.
+    m_translation->setToolTip(m_bible->rights().isEmpty()
+                                  ? m_bible->name()
+                                  : QStringLiteral("%1\n%2").arg(m_bible->name(), m_bible->rights()));
     m_bookModel->setStringList(Reference::bookCompletions(QString(), m_bible.get()));
     {
         const QSignalBlocker block(m_book);
@@ -319,9 +323,9 @@ void BiblePanel::updateButtons()
 void BiblePanel::importXml()
 {
     const QString path = QFileDialog::getOpenFileName(
-        this, tr("Import Zefania XML Bible"),
+        this, tr("Import Bible XML"),
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
-        tr("Zefania XML Bible (*.xml);;All files (*)"));
+        tr("Bible XML, Beblia or Zefania (*.xml);;All files (*)"));
     if (path.isEmpty()) return;
     QString error;
     QApplication::setOverrideCursor(Qt::WaitCursor);

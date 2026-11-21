@@ -17,7 +17,7 @@ struct BibleEntry {
     QString source;        // catalog path it was downloaded from, if any
 };
 
-// Installed translations: Zefania XML files in AppDataLocation/bibles stored
+// Installed translations: Zefania or Beblia XML files in AppDataLocation/bibles stored
 // as <id>.xml, with an index.json for names that the files get wrong.
 class BibleLibrary : public QObject {
     Q_OBJECT

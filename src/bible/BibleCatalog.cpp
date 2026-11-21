@@ -1,6 +1,8 @@
-#include "bible/ZefaniaCatalog.h"
+#include "bible/BibleCatalog.h"
 
+#include "bible/Bible.h"
 #include "bible/BibleLibrary.h"
+#include "bible/BookNames.h"
 
 #include <QDir>
 #include <QFile>
@@ -16,8 +18,9 @@
 #include <QStandardPaths>
 #include <algorithm>
 
-const char *const ZefaniaCatalog::kRepo = "kohelet-net-admin/zefania-xml-bibles";
-const char *const ZefaniaCatalog::kBranch = "master";
+const char *const BibleCatalog::kBebliaRepo = "Beblia/Holy-Bible-XML-Format";
+const char *const BibleCatalog::kZefaniaRepo = "kohelet-net-admin/zefania-xml-bibles";
+const char *const BibleCatalog::kBranch = "master";
 
 static constexpr qint64 kCacheMaxAgeSecs = 7 * 24 * 3600;
 
@@ -30,20 +33,30 @@ static QByteArray userAgent()
 
 QUrl CatalogEntry::downloadUrl() const
 {
-    const QByteArray encoded = QUrl::toPercentEncoding(path, "/");
-    return QUrl::fromEncoded("https://raw.githubusercontent.com/" + QByteArray(ZefaniaCatalog::kRepo) + '/'
-                             + ZefaniaCatalog::kBranch + '/' + encoded);
+    const QByteArray repo(source == Source::Beblia ? BibleCatalog::kBebliaRepo : BibleCatalog::kZefaniaRepo);
+    return QUrl::fromEncoded("https://raw.githubusercontent.com/" + repo + '/' + BibleCatalog::kBranch + '/'
+                             + QUrl::toPercentEncoding(path, "/"));
 }
 
 QString CatalogEntry::installId() const
 {
+    if (source == Source::Beblia) {
+        static const QRegularExpression suffix(QStringLiteral("(Bible)?\\.xml$"), QRegularExpression::CaseInsensitiveOption);
+        return BibleLibrary::makeId(QStringLiteral("beblia-") + QString(path).remove(suffix));
+    }
     // No date: a newer upload of the same module replaces the old install.
     return BibleLibrary::makeId(languageCode + '-' + module + '-' + name);
 }
 
+QString CatalogEntry::abbreviation() const
+{
+    return source == Source::Beblia ? Bible::bebliaAbbreviation(language, module)
+                                    : Bible::abbreviationFor(module, name);
+}
+
 // ---- parsing ---------------------------------------------------------------
 
-QString ZefaniaCatalog::languageName(const QString &code)
+static const QHash<QString, QString> &languageTable()
 {
     static const QHash<QString, QString> names = {
         {"ENG", "English"}, {"AFR", "Afrikaans"}, {"GER", "German"}, {"DEU", "German"},
@@ -70,13 +83,78 @@ QString ZefaniaCatalog::languageName(const QString &code)
         {"CYM", "Welsh"}, {"ICE", "Icelandic"}, {"ISL", "Icelandic"}, {"IRI", "Irish"},
         {"GLE", "Irish"}, {"AMH", "Amharic"}, {"UND", "Other"},
     };
-    const QString c = code.trimmed().toUpper();
-    return names.value(c, c);
+    return names;
+}
+
+QString BibleCatalog::languageName(const QString &code, const QString &fallback)
+{
+    const auto it = languageTable().constFind(code.trimmed().toUpper());
+    if (it != languageTable().cend()) return it.value();
+    return fallback.isEmpty() ? code.trimmed() : fallback;
+}
+
+QString BibleCatalog::languageCode(const QString &language)
+{
+    const QString c = BookNames::canonicalLanguage(language);
+    if (languageTable().contains(c)) return c;
+    // Reverse lookup by name; several codes share a name, prefer the ones Zefania uses.
+    static const QHash<QString, QString> byName = [] {
+        static const QSet<QString> preferred = {"GER", "DUT", "FRE", "GRE", "CHI", "CZE", "RUM", "ESP",
+                                                "GAE", "MAO", "SCR", "SLO", "WEL", "ICE", "IRI"};
+        QHash<QString, QString> h;
+        for (auto it = languageTable().cbegin(); it != languageTable().cend(); ++it) {
+            const QString key = it.value().toLower();
+            const auto cur = h.constFind(key);
+            if (cur == h.cend() || (preferred.contains(it.key()) && !preferred.contains(cur.value()))
+                || (preferred.contains(it.key()) == preferred.contains(cur.value()) && it.key() < cur.value()))
+                h.insert(key, it.key());
+        }
+        return h;
+    }();
+    return byName.value(language.trimmed().toLower(), language.trimmed());
+}
+
+bool BibleCatalog::looksPublicDomain(const QString &language, const QString &version)
+{
+    Q_UNUSED(language);
+    // Only the obvious ones; everything else needs the user's confirmation.
+    static const QSet<QString> free = {
+        "KJ", "KJV", "AKJV", "KJV1611", "ASV", "WEB", "WEBBE", "WEBME", "YLT", "DARBY", "WBS", "WEBSTER",
+        "RWEBSTER", "BBE", "DRA", "DOUAY", "GENEVA", "TYNDALE", "WYCLIFFE", "ROTHERHAM", "ROTH", "WEYMOUTH",
+        "WMTH", "NOYES", "LEESER", "JPS", "CPDV", "SEGOND", "LSG", "STATENVERTALING", "VULGATE", "CLVUL",
+    };
+    if (version.contains(QLatin1String("public domain"), Qt::CaseInsensitive)) return true;
+    static const QRegularExpression split(QStringLiteral("[^A-Za-z0-9]+"));
+    for (const QString &w : version.split(split, Qt::SkipEmptyParts)) {
+        const QString u = w.toUpper();
+        if (free.contains(u)) return true;
+        // A translation dated before 1930 is out of copyright almost everywhere.
+        if (u.size() == 4 && u[0].isDigit() && u.toInt() >= 1380 && u.toInt() < 1930) return true;
+    }
+    return false;
+}
+
+bool BibleCatalog::parseBebliaPath(const QString &path, CatalogEntry *entry)
+{
+    // Every Bible sits at the repo root as "<Language><Version>Bible.xml".
+    if (path.contains('/') || !path.endsWith(QLatin1String(".xml"), Qt::CaseInsensitive)) return false;
+    QString language, version;
+    if (!Bible::bebliaName(path, &language, &version)) return false;
+    CatalogEntry e;
+    e.source = CatalogEntry::Source::Beblia;
+    e.path = path;
+    e.language = language;
+    e.languageCode = languageCode(language);
+    e.module = version;
+    e.name = version.isEmpty() ? language : language + ' ' + version;
+    e.publicDomain = looksPublicDomain(language, version);
+    if (entry) *entry = e;
+    return true;
 }
 
 // Title-case the all-caps names in the file names, keeping acronyms:
 // "1933_1953 AFRIKAANS BYBEL" -> "1933/1953 Afrikaans Bybel", "ISV NT" stays.
-QString ZefaniaCatalog::prettyName(const QString &raw)
+QString BibleCatalog::prettyName(const QString &raw)
 {
     QString s = raw;
     s.remove(QRegularExpression(QStringLiteral("^DESCRIPTION_[A-Z]{2}="), QRegularExpression::CaseInsensitiveOption));
@@ -138,7 +216,7 @@ static QString normaliseDate(const QString &d)
     return d;
 }
 
-bool ZefaniaCatalog::parsePath(const QString &path, CatalogEntry *entry)
+bool BibleCatalog::parseZefaniaPath(const QString &path, CatalogEntry *entry)
 {
     if (!path.startsWith(QLatin1String("Bibles/")) || !path.endsWith(QLatin1String(".xml"), Qt::CaseInsensitive))
         return false;
@@ -168,25 +246,33 @@ bool ZefaniaCatalog::parsePath(const QString &path, CatalogEntry *entry)
         e.name = parts.size() > 3 ? parts[parts.size() - 2] : e.module;
     }
     if (e.name.isEmpty()) e.name = parts.size() > 3 ? parts[parts.size() - 2] : e.module;
+    e.source = CatalogEntry::Source::Zefania;
     e.language = languageName(e.languageCode);
+    e.publicDomain = looksPublicDomain(e.language, e.module + ' ' + e.name);
     if (entry) *entry = e;
     return true;
 }
 
 // ---- catalog ---------------------------------------------------------------
 
-ZefaniaCatalog::ZefaniaCatalog(BibleLibrary *library, QObject *parent)
+BibleCatalog::BibleCatalog(BibleLibrary *library, QObject *parent)
     : QObject(parent), m_library(library), m_nam(new QNetworkAccessManager(this))
 {
+    // Zefania keeps its old cache file name so existing caches stay valid.
+    m_sources.append(new SourceState{CatalogEntry::Source::Beblia, QLatin1String(kBebliaRepo),
+                                     QStringLiteral("beblia-catalog.json"), {}, {}, {}});
+    m_sources.append(new SourceState{CatalogEntry::Source::Zefania, QLatin1String(kZefaniaRepo),
+                                     QStringLiteral("zefania-catalog.json"), {}, {}, {}});
 }
 
-ZefaniaCatalog::~ZefaniaCatalog()
+BibleCatalog::~BibleCatalog()
 {
     // Don't let aborts call back into a half-destroyed object.
-    if (m_treeReply) {
-        m_treeReply->disconnect(this);
-        m_treeReply->abort();
-    }
+    for (SourceState *s : m_sources)
+        if (s->reply) {
+            s->reply->disconnect(this);
+            s->reply->abort();
+        }
     if (m_download) {
         m_download->disconnect(this);
         m_download->abort();
@@ -195,91 +281,108 @@ ZefaniaCatalog::~ZefaniaCatalog()
         m_downloadFile->close();
         m_downloadFile->remove();
     }
+    qDeleteAll(m_sources);
 }
 
-QString ZefaniaCatalog::cachePath() const
+static QString cacheDir()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/zefania-catalog.json";
+    return QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
 }
 
-bool ZefaniaCatalog::isInstalled(const CatalogEntry &e) const
+bool BibleCatalog::isInstalled(const CatalogEntry &e) const
 {
     return m_library && m_library->contains(e.installId());
 }
 
-void ZefaniaCatalog::setItems(const QJsonArray &items)
+void BibleCatalog::rebuild()
 {
-    // Keep only the newest upload of each module.
-    QHash<QString, int> latest;
     m_entries.clear();
-    for (const QJsonValue &v : items) {
-        const QJsonObject o = v.toObject();
-        CatalogEntry e;
-        if (!parsePath(o["path"].toString(), &e)) continue;
-        e.size = qint64(o["size"].toDouble());
-        const QString key = e.installId();
-        const auto it = latest.constFind(key);
-        if (it == latest.cend()) {
-            latest.insert(key, int(m_entries.size()));
-            m_entries.append(e);
-        } else if (e.date > m_entries[*it].date) {
-            m_entries[*it] = e;
+    QHash<QString, int> latest;  // Zefania: keep only the newest upload of each module
+    for (const SourceState *s : m_sources) {
+        for (const QJsonValue &v : s->items) {
+            const QJsonObject o = v.toObject();
+            CatalogEntry e;
+            const bool ok = s->source == CatalogEntry::Source::Beblia ? parseBebliaPath(o["path"].toString(), &e)
+                                                                       : parseZefaniaPath(o["path"].toString(), &e);
+            if (!ok) continue;
+            e.size = qint64(o["size"].toDouble());
+            const QString key = e.installId();
+            const auto it = latest.constFind(key);
+            if (it == latest.cend()) {
+                latest.insert(key, int(m_entries.size()));
+                m_entries.append(e);
+            } else if (e.date > m_entries[*it].date) {
+                m_entries[*it] = e;
+            }
         }
     }
     auto rank = [](const CatalogEntry &e) { return e.languageCode == "ENG" ? 0 : e.languageCode == "AFR" ? 1 : 2; };
     std::sort(m_entries.begin(), m_entries.end(), [&](const CatalogEntry &a, const CatalogEntry &b) {
         if (rank(a) != rank(b)) return rank(a) < rank(b);
         if (a.language != b.language) return a.language.localeAwareCompare(b.language) < 0;
+        if (a.source != b.source) return a.source == CatalogEntry::Source::Beblia;
         return a.name.localeAwareCompare(b.name) < 0;
     });
 }
 
-bool ZefaniaCatalog::loadCache(bool requireFresh)
+bool BibleCatalog::loadCache(SourceState &s, bool requireFresh)
 {
-    QFile f(cachePath());
+    QFile f(cacheDir() + '/' + s.cacheFile);
     if (!f.open(QIODevice::ReadOnly)) return false;
     const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
     const QDateTime fetched = QDateTime::fromString(o["fetched"].toString(), Qt::ISODate);
-    if (!fetched.isValid() || o["repo"].toString() != QLatin1String(kRepo)) return false;
+    if (!fetched.isValid() || o["repo"].toString() != s.repo) return false;
     if (requireFresh && fetched.secsTo(QDateTime::currentDateTimeUtc()) > kCacheMaxAgeSecs) return false;
-    setItems(o["items"].toArray());
-    m_fetchedAt = fetched;
-    return !m_entries.isEmpty();
+    const QJsonArray items = o["items"].toArray();
+    if (items.isEmpty()) return false;
+    s.items = items;
+    s.fetchedAt = fetched;
+    return true;
 }
 
-void ZefaniaCatalog::saveCache(const QJsonArray &items)
+void BibleCatalog::saveCache(const SourceState &s)
 {
-    QDir().mkpath(QFileInfo(cachePath()).absolutePath());
-    QSaveFile f(cachePath());
+    QDir().mkpath(cacheDir());
+    QSaveFile f(cacheDir() + '/' + s.cacheFile);
     if (!f.open(QIODevice::WriteOnly)) return;
-    const QJsonObject o{{"repo", kRepo}, {"fetched", m_fetchedAt.toString(Qt::ISODate)}, {"items", items}};
+    const QJsonObject o{{"repo", s.repo}, {"fetched", s.fetchedAt.toString(Qt::ISODate)}, {"items", s.items}};
     f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
     f.commit();
 }
 
-void ZefaniaCatalog::refresh(bool force)
+void BibleCatalog::refresh(bool force)
 {
-    if (m_treeReply) return;
-    if (!force && loadCache(true)) {
-        emit catalogReady();
-        return;
-    }
-    QNetworkRequest req(QUrl(QStringLiteral("https://api.github.com/repos/%1/git/trees/%2?recursive=1")
-                                 .arg(QLatin1String(kRepo), QLatin1String(kBranch))));
+    if (m_pending > 0) return;
+    m_problems.clear();
+    for (SourceState *s : m_sources)
+        if (force || !loadCache(*s, true)) fetch(*s);
+    if (m_pending == 0) finishRefresh();
+}
+
+void BibleCatalog::fetch(SourceState &s)
+{
+    // Beblia keeps every file at the root, so no recursion (and a small reply).
+    const bool recursive = s.source == CatalogEntry::Source::Zefania;
+    QNetworkRequest req(QUrl(QStringLiteral("https://api.github.com/repos/%1/git/trees/%2%3")
+                                 .arg(s.repo, QLatin1String(kBranch),
+                                      recursive ? QStringLiteral("?recursive=1") : QString())));
     req.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
     req.setRawHeader("Accept", "application/vnd.github+json");
     req.setTransferTimeout(30000);
-    m_treeReply = m_nam->get(req);
-    connect(m_treeReply, &QNetworkReply::finished, this, &ZefaniaCatalog::onTreeFinished);
+    s.reply = m_nam->get(req);
+    ++m_pending;
+    SourceState *sp = &s;
+    connect(s.reply, &QNetworkReply::finished, this, [this, sp] { onTreeFinished(*sp); });
 }
 
-void ZefaniaCatalog::onTreeFinished()
+void BibleCatalog::onTreeFinished(SourceState &s)
 {
-    QNetworkReply *reply = m_treeReply;
-    m_treeReply = nullptr;
+    QNetworkReply *reply = s.reply;
+    s.reply = nullptr;
     if (!reply) return;
     reply->deleteLater();
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QString label = s.source == CatalogEntry::Source::Beblia ? QStringLiteral("Beblia") : QStringLiteral("Zefania");
 
     QString message;
     if (reply->error() == QNetworkReply::NoError && status == 200) {
@@ -287,38 +390,53 @@ void ZefaniaCatalog::onTreeFinished()
         QJsonArray items;
         for (const QJsonValue &v : o["tree"].toArray()) {
             const QJsonObject t = v.toObject();
-            if (t["type"].toString() == QLatin1String("blob") && parsePath(t["path"].toString(), nullptr))
-                items.append(QJsonObject{{"path", t["path"]}, {"size", t["size"]}});
+            const QString path = t["path"].toString();
+            if (t["type"].toString() != QLatin1String("blob")) continue;
+            const bool ok = s.source == CatalogEntry::Source::Beblia ? parseBebliaPath(path, nullptr)
+                                                                     : parseZefaniaPath(path, nullptr);
+            if (ok) items.append(QJsonObject{{"path", path}, {"size", t["size"]}});
         }
         if (!items.isEmpty()) {
-            m_fetchedAt = QDateTime::currentDateTimeUtc();
-            saveCache(items);
-            setItems(items);
-            emit catalogReady();
-            return;
+            s.items = items;
+            s.fetchedAt = QDateTime::currentDateTimeUtc();
+            saveCache(s);
+        } else {
+            message = tr("the list was empty or unreadable");
         }
-        message = tr("The online list was empty or unreadable.");
     } else if ((status == 403 || status == 429) && reply->rawHeader("x-ratelimit-remaining") == "0") {
         const QDateTime reset = QDateTime::fromSecsSinceEpoch(reply->rawHeader("x-ratelimit-reset").toLongLong());
-        message = tr("GitHub's hourly limit for anonymous requests was reached; try again after %1.")
+        message = tr("GitHub's hourly limit for anonymous requests was reached; try again after %1")
                       .arg(reset.toLocalTime().toString(QStringLiteral("HH:mm")));
     } else {
         message = reply->errorString();
     }
 
-    if (loadCache(false)) {
-        emit notice(tr("Couldn't refresh the online list (%1). Showing the list from %2.")
-                        .arg(message, m_fetchedAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd"))));
-        emit catalogReady();
-    } else {
-        emit catalogError(tr("Couldn't load the online Bible list: %1").arg(message));
+    if (!message.isEmpty()) {
+        if (loadCache(s, false))
+            m_problems << tr("%1: %2 (showing the list from %3)")
+                              .arg(label, message, s.fetchedAt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd")));
+        else
+            m_problems << tr("%1: %2").arg(label, message);
     }
+    if (--m_pending == 0) finishRefresh();
 }
 
-bool ZefaniaCatalog::download(const CatalogEntry &e)
+void BibleCatalog::finishRefresh()
+{
+    rebuild();
+    if (m_entries.isEmpty()) {
+        emit catalogError(tr("Couldn't load the online Bible list. %1").arg(m_problems.join(QStringLiteral("; "))));
+        return;
+    }
+    if (!m_problems.isEmpty())
+        emit notice(tr("Couldn't refresh part of the online list. %1").arg(m_problems.join(QStringLiteral("; "))));
+    emit catalogReady();
+}
+
+bool BibleCatalog::download(const CatalogEntry &e)
 {
     if (m_download) return false;
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/downloads";
+    const QString dir = cacheDir() + "/downloads";
     QDir().mkpath(dir);
     m_downloadFile = new QFile(dir + '/' + e.installId() + ".xml.part", this);
     if (!m_downloadFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -339,16 +457,16 @@ bool ZefaniaCatalog::download(const CatalogEntry &e)
     connect(m_download, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
         emit downloadProgress(received, total > 0 ? total : m_downloadEntry.size);
     });
-    connect(m_download, &QNetworkReply::finished, this, &ZefaniaCatalog::onDownloadFinished);
+    connect(m_download, &QNetworkReply::finished, this, &BibleCatalog::onDownloadFinished);
     return true;
 }
 
-void ZefaniaCatalog::cancelDownload()
+void BibleCatalog::cancelDownload()
 {
     if (m_download) m_download->abort();  // finishes with OperationCanceledError
 }
 
-void ZefaniaCatalog::onDownloadFinished()
+void BibleCatalog::onDownloadFinished()
 {
     QNetworkReply *reply = m_download;
     m_download = nullptr;
@@ -369,13 +487,15 @@ void ZefaniaCatalog::onDownloadFinished()
         return;
     }
 
+    const CatalogEntry &e = m_downloadEntry;
     BibleEntry hint;
-    hint.id = m_downloadEntry.installId();
-    hint.name = m_downloadEntry.name;
-    hint.languageCode = m_downloadEntry.languageCode;
-    hint.language = m_downloadEntry.language;
-    hint.abbreviation = Bible::abbreviationFor(m_downloadEntry.module, m_downloadEntry.name);
-    hint.source = m_downloadEntry.path;
+    hint.id = e.installId();
+    // Beblia files name themselves well ("Afrikaans 1983"); Zefania file names are better than their titles.
+    if (e.source == CatalogEntry::Source::Zefania) hint.name = e.name;
+    hint.languageCode = e.languageCode;
+    hint.language = e.language;
+    hint.abbreviation = e.abbreviation();
+    hint.source = e.sourceName() + QStringLiteral(": ") + e.path;
     QString error;
     const QString id = m_library ? m_library->importFile(path, &error, hint) : QString();
     QFile::remove(path);

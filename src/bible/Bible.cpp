@@ -79,17 +79,61 @@ static void readInformation(QXmlStreamReader &xml, BibleInfo *info)
     }
 }
 
-// Positions the reader inside <XMLBIBLE> and reads its name attribute.
+// Positions the reader inside the root element: <XMLBIBLE biblename> (Zefania)
+// or <bible translation status link> (Beblia).
 static bool openRoot(QXmlStreamReader &xml, BibleInfo *info, QString *error)
 {
-    if (!xml.readNextStartElement() || !is(xml.name(), u"XMLBIBLE")) {
+    if (!xml.readNextStartElement() || !(is(xml.name(), u"XMLBIBLE") || is(xml.name(), u"bible"))) {
         if (error)
-            *error = xml.hasError() ? xml.errorString() : tr("Not a Zefania XML Bible (no <XMLBIBLE> element).");
+            *error = xml.hasError() ? xml.errorString()
+                                    : tr("Not a Zefania or Beblia XML Bible (no <XMLBIBLE> or <bible> element).");
         return false;
     }
-    // biblename keeps characters the title sometimes mangles ("1933/1953" vs "1933_1953").
-    info->name = xml.attributes().value(QLatin1String("biblename")).toString().simplified();
+    const QXmlStreamAttributes a = xml.attributes();
+    info->beblia = is(xml.name(), u"bible");
+    if (info->beblia) {
+        info->name = a.value(QLatin1String("translation")).toString().simplified();
+        info->rights = a.value(QLatin1String("status")).toString().simplified();
+        info->link = a.value(QLatin1String("link")).toString().trimmed();
+    } else {
+        // biblename keeps characters the title sometimes mangles ("1933/1953" vs "1933_1953").
+        info->name = a.value(QLatin1String("biblename")).toString().simplified();
+    }
     return true;
+}
+
+bool Bible::bebliaName(const QString &fileName, QString *language, QString *version)
+{
+    QString base = QFileInfo(fileName).fileName();
+    static const QRegularExpression suffix(QStringLiteral("(Bible)?\\.xml$"), QRegularExpression::CaseInsensitiveOption);
+    base.remove(suffix);
+    static const QRegularExpression head(QStringLiteral("^([A-Z][a-z]+(?:[A-Z][a-z]+)?)(.*)$"));
+    const auto m = head.match(base);
+    if (!m.hasMatch()) return false;
+    QString lang = m.captured(1), ver = m.captured(2);
+    // "NorthernSotho" is one language; "AmharicDawro..." is Amharic + a version.
+    static const QRegularExpression two(QStringLiteral("^([A-Z][a-z]+)([A-Z][a-z]+)$"));
+    static const QStringList joined = {"Sotho", "Ndebele", "Creole", "Malay", "Arabic", "Quechua",
+                                       "Nahuatl", "Zapotec", "Mixtec", "Otomi"};
+    const auto t = two.match(lang);
+    if (t.hasMatch() && !joined.contains(t.captured(2))) {
+        lang = t.captured(1);
+        ver = t.captured(2) + ver;
+    }
+    static const QRegularExpression camel(QStringLiteral("([a-z])([A-Z])"));
+    static const QRegularExpression camelVer(QStringLiteral("([a-z0-9])([A-Z])"));
+    static const QRegularExpression letterDigit(QStringLiteral("([A-Za-z])(\\d)"));
+    if (language) *language = lang.replace(camel, QStringLiteral("\\1 \\2"));
+    if (version)
+        *version = ver.replace(camelVer, QStringLiteral("\\1 \\2")).replace(letterDigit, QStringLiteral("\\1 \\2")).simplified();
+    return true;
+}
+
+// Beblia has no <language>: take it from a "Afrikaans1983Bible.xml" style name.
+static void languageFromFileName(BibleInfo *info, const QString &path)
+{
+    QString lang;
+    if (info->beblia && info->language.isEmpty() && Bible::bebliaName(path, &lang)) info->language = lang;
 }
 
 bool Bible::readInfo(const QString &path, BibleInfo *info, QString *error)
@@ -102,11 +146,12 @@ bool Bible::readInfo(const QString &path, BibleInfo *info, QString *error)
     QXmlStreamReader xml(&f);
     *info = BibleInfo();
     if (!openRoot(xml, info, error)) return false;
-    while (xml.readNextStartElement()) {
+    while (!info->beblia && xml.readNextStartElement()) {
         if (is(xml.name(), u"INFORMATION")) readInformation(xml, info);
         else break;  // first BIBLEBOOK: header is done
     }
     if (info->name.isEmpty()) info->name = QFileInfo(path).completeBaseName();
+    languageFromFileName(info, path);
     return true;
 }
 
@@ -119,6 +164,7 @@ bool Bible::load(const QString &path, QString *error)
     }
     const bool ok = load(&f, error);
     if (ok && m_info.name.isEmpty()) m_info.name = QFileInfo(path).completeBaseName();
+    if (ok) languageFromFileName(&m_info, path);
     return ok;
 }
 
@@ -128,23 +174,24 @@ bool Bible::load(QIODevice *device, QString *error)
     QXmlStreamReader xml(device);
     if (!openRoot(xml, &m_info, error)) return false;
 
-    while (xml.readNextStartElement()) {
-        if (is(xml.name(), u"INFORMATION")) {
-            readInformation(xml, &m_info);
-            continue;
-        }
-        if (!is(xml.name(), u"BIBLEBOOK")) {
-            xml.skipCurrentElement();
-            continue;
-        }
+    // Element/attribute names for the two layouts.
+    const bool beblia = m_info.beblia;
+    const QStringView bookTag = beblia ? u"book" : u"BIBLEBOOK";
+    const QLatin1String bookNumber(beblia ? "number" : "bnumber");
+    const QStringView chapterTag = beblia ? u"chapter" : u"CHAPTER";
+    const QLatin1String chapterNumber(beblia ? "number" : "cnumber");
+    const QStringView verseTag = beblia ? u"verse" : u"VERS";
+    const QLatin1String verseNumber(beblia ? "number" : "vnumber");
+
+    auto readBook = [&] {
         const QXmlStreamAttributes a = xml.attributes();
         const QString bname = a.value(QLatin1String("bname")).toString().simplified();
         const QString bsname = a.value(QLatin1String("bsname")).toString().simplified();
-        int number = leadingInt(a.value(QLatin1String("bnumber")));
+        int number = leadingInt(a.value(bookNumber));
         if (number <= 0) number = BookNames::match(bname);
         if (number <= 0) {
             xml.skipCurrentElement();
-            continue;
+            return;
         }
         Book &book = m_books[number];
         book.info.number = number;
@@ -152,24 +199,39 @@ bool Bible::load(QIODevice *device, QString *error)
         if (book.info.shortName.isEmpty()) book.info.shortName = bsname;
 
         while (xml.readNextStartElement()) {
-            if (!is(xml.name(), u"CHAPTER")) {
+            if (!is(xml.name(), chapterTag)) {
                 xml.skipCurrentElement();
                 continue;
             }
-            const int ch = leadingInt(xml.attributes().value(QLatin1String("cnumber")));
-            QList<Verse> &verses = book.chapters[qMax(1, ch)];
+            const int ch = qMax(1, leadingInt(xml.attributes().value(chapterNumber)));
+            QList<Verse> &verses = book.chapters[ch];
             while (xml.readNextStartElement()) {
-                if (!is(xml.name(), u"VERS")) {
+                if (!is(xml.name(), verseTag)) {
                     xml.skipCurrentElement();  // CAPTION, PROLOG, REMARK, ...
                     continue;
                 }
                 Verse v;
                 v.book = number;
-                v.chapter = qMax(1, ch);
-                v.verse = leadingInt(xml.attributes().value(QLatin1String("vnumber")));
+                v.chapter = ch;
+                v.verse = leadingInt(xml.attributes().value(verseNumber));
                 v.text = readVerseText(xml);
                 if (v.verse > 0 && !v.text.isEmpty()) verses.append(v);
             }
+        }
+    };
+
+    while (xml.readNextStartElement()) {
+        if (is(xml.name(), u"INFORMATION")) {
+            readInformation(xml, &m_info);
+        } else if (beblia && is(xml.name(), u"testament")) {
+            while (xml.readNextStartElement()) {
+                if (is(xml.name(), bookTag)) readBook();
+                else xml.skipCurrentElement();
+            }
+        } else if (is(xml.name(), bookTag)) {
+            readBook();
+        } else {
+            xml.skipCurrentElement();
         }
     }
     if (xml.hasError()) {
@@ -204,7 +266,6 @@ bool Bible::load(QIODevice *device, QString *error)
         for (const auto &c : it->chapters) m_verseTotal += c.size();
         ++it;
     }
-    for (auto it = m_books.begin(); it != m_books.end(); ++it) it->info.name = bookName(it.key());
 
     if (m_books.isEmpty()) {
         if (error) *error = tr("The file contains no Bible books.");
@@ -228,16 +289,42 @@ QString Bible::abbreviationFor(const QString &identifier, const QString &name)
     return abbr.left(8);
 }
 
+QString Bible::bebliaAbbreviation(const QString &language, const QString &version)
+{
+    const QString lang = BookNames::stripDiacritics(language).remove(' ').left(3).toUpper();
+    const QStringList words = version.split(' ', Qt::SkipEmptyParts);
+    if (words.isEmpty()) return lang;
+    static const QRegularExpression year(QStringLiteral("^\\d{4}$"));
+    if (words.size() == 1 && year.match(words[0]).hasMatch()) return lang + words[0].right(2);  // "AFR83"
+    QString v = words.last().toUpper();
+    if (v == QLatin1String("KJ")) v = QStringLiteral("KJV");
+    return v.left(8);
+}
+
+QString Bible::abbreviationOf(const BibleInfo &info)
+{
+    if (info.beblia && info.identifier.isEmpty()) {
+        // translation="Afrikaans 1983" / "English KJV": first word is the language.
+        const int sp = info.name.indexOf(' ');
+        return sp > 0 ? bebliaAbbreviation(info.name.left(sp), info.name.mid(sp + 1))
+                      : bebliaAbbreviation(info.name, QString());
+    }
+    return abbreviationFor(info.identifier, info.name);
+}
+
 QString Bible::abbreviation() const
 {
-    return abbreviationFor(m_info.identifier, m_info.name);
+    return abbreviationOf(m_info);
 }
 
 QList<BookInfo> Bible::books() const
 {
     QList<BookInfo> list;
     list.reserve(m_books.size());
-    for (const Book &b : m_books) list.append(b.info);
+    for (const Book &b : m_books) {
+        list.append(b.info);
+        list.last().name = bookName(b.info.number);  // the language may be set after loading
+    }
     return list;
 }
 

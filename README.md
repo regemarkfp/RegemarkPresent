@@ -4,7 +4,7 @@
 
 Presentation software for running church services. You build songs and slides, then send them to several screens at the same time: projectors and monitors through the graphics card, NDI over the network, and SDI through Blackmagic DeckLink cards.
 
-## What it does (v0.2)
+## What it does (v0.3)
 
 **Songs**
 - Library with search (title, lyrics, author, CCLI #), looks you can apply to many songs, and a default look for new songs
@@ -13,18 +13,19 @@ Presentation software for running church services. You build songs and slides, t
 - **Arrangements**: named orders such as V1 C V2 C B C C, without duplicating slides
 
 **Presentations (slide decks, separate from songs)**
-- A ProPresenter-style editor: drag and resize elements on the slide with snap guides
+- A ProPresenter-style editor: type directly on the slide, drag and resize elements with snap guides
 - Text boxes with per-word formatting, plus **images** (logos, photos) and **shapes** (panels, bands, cards), with layer order, rounded corners and opacity
 - **Media slides**: full-screen photos and videos (videos play with sound)
 - **Import PowerPoint and PDF**: each slide becomes an image slide. This uses PowerPoint on Windows if it's installed, otherwise LibreOffice
 - Per-slide transitions (cut, fade, slide, zoom) and per-element build animations
 
 **Bible**
-- Browse and download Bibles from the Zefania library inside the app (including the Afrikaans 1933/1953 and KJV), or import your own Zefania XML
+- Browse and download **1,276 Bibles** inside the app, from the [Beblia](https://github.com/Beblia/Holy-Bible-XML-Format) collection (1,048 translations in 247 languages, e.g. Afrikaans 1933/53, 1983, 2020, 2023, NLV, Die Boodskap; English KJV, NIV, ESV, NLT...) and the Zefania library, or import your own Beblia/Zefania XML. Copyrighted translations ask you to confirm your church may use them
 - Type "John 3:16-18", "Joh 3:16" or "Johannes 3:16". Verses become slides with a reference line; show them straight away or add them to the playlist
 
 **Running the service**
-- Playlists with headers. At the end of an item, "next" moves to the next one
+- A **rundown** with fixed segments: Pre-Service (loops on its own), Intro, Service (split it into Welcoming, Worship, Sermon, Baptism, Communion...), Outro and Post-Service. **+ Add item** adds a song, presentation, media, scripture or countdown to the selected segment
+- At the end of an item, "next" moves to the next one
 - **Backgrounds per slide that change as a song builds**, a media bin over your folders (e.g. Sunday Screens downloads), and crossfades
 - **Media cues and announcement loops**: videos with sound, images that advance every N seconds, and looping
 - **Timer**: a countdown for a set length or until a time, shown on the confidence screen. `{timer}`, `{clock}` and `{date}` work in any slide text, and there's a one-click "Service starts in" slide

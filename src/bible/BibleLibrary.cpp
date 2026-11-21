@@ -1,7 +1,7 @@
 #include "bible/BibleLibrary.h"
 
 #include "bible/BookNames.h"
-#include "bible/ZefaniaCatalog.h"
+#include "bible/BibleCatalog.h"
 
 #include <QDir>
 #include <QFile>
@@ -42,9 +42,9 @@ BibleEntry BibleLibrary::entryFor(const QString &id, const BibleInfo &info, cons
     e.id = id;
     e.path = path;
     e.name = QString(info.name).replace('_', ' ').simplified();
-    e.languageCode = BookNames::canonicalLanguage(info.language);
-    e.language = ZefaniaCatalog::languageName(e.languageCode);
-    e.abbreviation = Bible::abbreviationFor(info.identifier, e.name);
+    e.languageCode = BibleCatalog::languageCode(info.language);
+    e.language = BibleCatalog::languageName(e.languageCode, info.language);
+    e.abbreviation = Bible::abbreviationOf(info);
     return e;
 }
 
@@ -131,9 +131,10 @@ QString BibleLibrary::importFile(const QString &path, QString *error, const Bibl
     auto bible = std::make_shared<Bible>();
     QString err;
     if (!bible->load(path, &err)) {
-        if (error) *error = tr("“%1” isn't a usable Zefania XML Bible: %2").arg(QFileInfo(path).fileName(), err);
+        if (error) *error = tr("“%1” isn't a usable Zefania or Beblia XML Bible: %2").arg(QFileInfo(path).fileName(), err);
         return {};
     }
+    if (!hint.languageCode.isEmpty()) bible->setLanguage(hint.languageCode);  // Beblia files have none
     QString id = makeId(hint.id);
     if (hint.id.isEmpty()) {
         const QString lang = BookNames::canonicalLanguage(bible->language());
@@ -155,7 +156,7 @@ QString BibleLibrary::importFile(const QString &path, QString *error, const Bibl
     if (!hint.name.isEmpty()) e.name = hint.name;
     if (!hint.languageCode.isEmpty()) e.languageCode = hint.languageCode;
     if (!hint.language.isEmpty()) e.language = hint.language;
-    else if (!hint.languageCode.isEmpty()) e.language = ZefaniaCatalog::languageName(hint.languageCode);
+    else if (!hint.languageCode.isEmpty()) e.language = BibleCatalog::languageName(hint.languageCode);
     if (!hint.abbreviation.isEmpty()) e.abbreviation = hint.abbreviation;
     e.source = hint.source;
     m_index[id] = toJson(e);
@@ -211,6 +212,8 @@ std::shared_ptr<const Bible> BibleLibrary::load(const QString &id, QString *erro
     }
     auto bible = std::make_shared<Bible>();
     if (!bible->load(e.path, error)) return nullptr;
+    // The index knows the language of files that don't say (Beblia).
+    if (!e.languageCode.isEmpty()) bible->setLanguage(e.languageCode);
     cache(id, bible);
     return bible;
 }

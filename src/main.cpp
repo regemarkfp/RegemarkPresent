@@ -1,4 +1,6 @@
 #include "core/AppSettings.h"
+#include "bible/BibleDownloadDialog.h"
+#include "bible/BibleLibrary.h"
 #include "bible/BiblePanel.h"
 #include "core/Library.h"
 #include "ui/MainWindow.h"
@@ -35,6 +37,8 @@ int main(int argc, char *argv[])
     args.addOption(grabScreens);
     QCommandLineOption grabEditor("grab-editor", "Save a screenshot of the slide editor (first song) to <file> and exit (diagnostics).", "file");
     args.addOption(grabEditor);
+    QCommandLineOption grabBibles("grab-bibles", "Save a screenshot of Get Bibles (online catalogue) to <file> and exit (diagnostics).", "file");
+    args.addOption(grabBibles);
     args.process(app);
 
     if (args.isSet(grabScreens)) {
@@ -42,6 +46,18 @@ int main(int argc, char *argv[])
         dlg.show();
         QTimer::singleShot(1200, &dlg, [&] {
             dlg.grab().save(args.value(grabScreens));
+            QApplication::exit(0);
+        });
+        return app.exec();
+    }
+
+    if (args.isSet(grabBibles)) {
+        BibleLibrary bibles;
+        BibleDownloadDialog dlg(&bibles);
+        dlg.resize(1100, 700);
+        dlg.show();
+        QTimer::singleShot(8000, &dlg, [&] {   // give the catalogue time to download
+            dlg.grab().save(args.value(grabBibles));
             QApplication::exit(0);
         });
         return app.exec();
