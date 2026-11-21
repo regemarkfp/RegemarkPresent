@@ -33,6 +33,7 @@ set(SOURCES
     src/ui/MediaBin.cpp
     src/ui/Widgets.cpp
     src/ui/Theme.cpp
+    src/ui/SongSelectBrowser.cpp
 )
 
 if(DECKLINK_SDK_DIR)
@@ -63,6 +64,17 @@ add_library(rpcore STATIC ${SOURCES})
 target_include_directories(rpcore PUBLIC src)
 target_link_libraries(rpcore PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia)
 target_compile_definitions(rpcore PUBLIC RP_VERSION="${PROJECT_VERSION}")
+
+# Optional: SongSelect opens inside the app when Qt WebEngine is available;
+# otherwise it falls back to the system browser + watching Downloads.
+find_package(Qt6 QUIET COMPONENTS WebEngineWidgets)
+if(Qt6WebEngineWidgets_FOUND)
+    target_link_libraries(rpcore PUBLIC Qt6::WebEngineWidgets)
+    target_compile_definitions(rpcore PRIVATE RP_HAVE_WEBENGINE=1)
+    message(STATUS "SongSelect: embedded browser (Qt WebEngine)")
+else()
+    message(STATUS "SongSelect: system browser fallback (Qt WebEngine not found)")
+endif()
 
 qt_add_executable(RegemarkPresent WIN32 src/main.cpp resources/resources.qrc)
 if(WIN32)

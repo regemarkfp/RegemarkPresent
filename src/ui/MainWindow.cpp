@@ -7,6 +7,7 @@
 #include "ui/MediaBin.h"
 #include "ui/ScreenSetupDialog.h"
 #include "ui/SlideEditor.h"
+#include "ui/SongSelectBrowser.h"
 #include "ui/Theme.h"
 
 #include <QAction>
@@ -336,6 +337,8 @@ void MainWindow::buildActions()
         if (toolbar) tb->addAction(a);
         return a;
     };
+    QAction *ss = add(file, tr("SongSelect"), [this] { openSongSelect(); }, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    ss->setToolTip(tr("Find songs on CCLI SongSelect; downloads go straight into your library"));
     add(file, tr("New song…"), [this] { newPresentation(); }, QKeySequence::New);
     add(file, tr("Paste lyrics…"), [this] { newFromLyrics(); });
     add(file, tr("Import files…"), [this] { importSongs(); }, QKeySequence(Qt::CTRL | Qt::Key_I));
@@ -693,9 +696,14 @@ void MainWindow::importSongs(const QStringList &given)
     m_settings.linesPerSlide = lines;
     m_settings.lastImportDir = QFileInfo(files.first()).absolutePath();
     m_settings.save();
+    importFiles(files, false);
+}
 
+void MainWindow::importFiles(const QStringList &files, bool quiet)
+{
     QStringList errors;
     QString lastId;
+    int added = 0;
     Presentation templ;
     for (const QString &f : files) {
         SongImporter::Song song;
@@ -704,13 +712,39 @@ void MainWindow::importSongs(const QStringList &given)
             errors << err;
             continue;
         }
-        const Presentation p = SongImporter::toPresentation(song, lines, templ);
+        // Downloading the same SongSelect song twice shouldn't duplicate it.
+        if (!song.ccliNumber.isEmpty()) {
+            QString existing;
+            for (const Presentation &p : m_library->presentations())
+                if (p.ccliNumber == song.ccliNumber) existing = p.id;
+            if (!existing.isEmpty()) {
+                lastId = existing;
+                continue;
+            }
+        }
+        const Presentation p = SongImporter::toPresentation(song, m_settings.linesPerSlide, templ);
         m_library->save(p);
         lastId = p.id;
+        ++added;
     }
     if (!lastId.isEmpty()) showPresentation(lastId);
-    statusBar()->showMessage(tr("Imported %1 of %2 songs").arg(files.size() - errors.size()).arg(files.size()), 5000);
-    if (!errors.isEmpty()) QMessageBox::warning(this, tr("Import"), errors.join('\n'));
+    if (added == 0 && !lastId.isEmpty())
+        statusBar()->showMessage(tr("Already in your library: %1").arg(m_current.title), 6000);
+    else
+        statusBar()->showMessage(tr("Imported %1 of %2 songs").arg(added).arg(files.size()), 6000);
+    if (!errors.isEmpty() && !quiet) QMessageBox::warning(this, tr("Import"), errors.join('\n'));
+}
+
+void MainWindow::openSongSelect()
+{
+    if (!m_songSelect) {
+        m_songSelect = new SongSelectBrowser(this);
+        connect(m_songSelect, &SongSelectBrowser::songFileReady, this,
+                [this](const QString &path) { importFiles({path}, true); });
+    }
+    m_songSelect->show();
+    m_songSelect->raise();
+    m_songSelect->activateWindow();
 }
 
 void MainWindow::editPresentation(int slideIndex)

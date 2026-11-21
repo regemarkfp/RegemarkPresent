@@ -28,7 +28,7 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           arch: win64_msvc2022_64
-          modules: qtmultimedia
+          modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
           cache: true
 
       # The DeckLink SDK can't be redistributed in a public repo. Upload the

@@ -13,6 +13,7 @@ class QLineEdit;
 class QListWidget;
 class QTabWidget;
 class ShowController;
+class SongSelectBrowser;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -45,6 +46,8 @@ private:
     void newPresentation();
     void newFromLyrics();
     void importSongs(const QStringList &files = {});
+    void importFiles(const QStringList &files, bool quiet);
+    void openSongSelect();
     void editPresentation(int slideIndex = 0);
     void deletePresentation();
     void saveCurrent();
@@ -77,4 +80,5 @@ private:
     QList<QLabel *> m_previews;
     QList<QLabel *> m_previewStatus;
     MediaBin *m_media;
+    SongSelectBrowser *m_songSelect = nullptr;
 };
