@@ -126,7 +126,8 @@ jobs:
           export LINUXDEPLOY_OUTPUT_VERSION="$version"
           ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
           mkdir -p dist
-          mv ./*-x86_64.AppImage "dist/RegemarkPresent-$version-x86_64.AppImage"
+          # The packaging tools are AppImages too; pick ours.
+          mv "$(ls ./*.AppImage | grep -v '/linuxdeploy')" "dist/RegemarkPresent-$version-x86_64.AppImage"
 
       - name: Smoke-test the AppImage
         run: QT_QPA_PLATFORM=offscreen dist/*.AppImage --appimage-extract-and-run --version
