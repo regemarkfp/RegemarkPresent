@@ -21,6 +21,7 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
+SetupIconFile=..\resources\app.ico
 PrivilegesRequired=admin
 
 [Tasks]

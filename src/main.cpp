@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QIcon>
 #include <QListWidget>
 #include <QTimer>
 #include <QPalette>
@@ -37,6 +38,7 @@ int main(int argc, char *argv[])
     QApplication::setApplicationVersion(RP_VERSION);
     // Closing an output window must not quit the app; MainWindow quits explicitly.
     QApplication::setQuitOnLastWindowClosed(false);
+    QApplication::setWindowIcon(QIcon(":/icon.png"));
     applyDarkTheme(app);
 
     QCommandLineParser args;

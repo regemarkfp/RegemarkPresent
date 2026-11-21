@@ -1,3 +1,5 @@
+<img src="resources/icon_256.png" width="96" align="right" alt="">
+
 # Regemark Present
 
 Presentation software for running church services. You build songs and slides, then send them to several screens at the same time: projectors and monitors through the graphics card, NDI over the network, and SDI through Blackmagic DeckLink cards.

@@ -4,6 +4,7 @@ project(RegemarkPresent VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Multimedia)
 
@@ -62,7 +63,10 @@ target_include_directories(rpcore PUBLIC src)
 target_link_libraries(rpcore PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia)
 target_compile_definitions(rpcore PUBLIC RP_VERSION="${PROJECT_VERSION}")
 
-qt_add_executable(RegemarkPresent WIN32 src/main.cpp)
+qt_add_executable(RegemarkPresent WIN32 src/main.cpp resources/resources.qrc)
+if(WIN32)
+    target_sources(RegemarkPresent PRIVATE resources/app.rc)  # .exe icon
+endif()
 target_link_libraries(RegemarkPresent PRIVATE rpcore)
 
 if(DECKLINK_SDK_DIR)
